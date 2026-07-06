@@ -1,72 +1,84 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "Micro Wheeled-Leg Robot",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#1eaee4",
+    "light": "#6dc9ee",
+    "dark": "#244ca5"
   },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
+  "favicon": "https://media.brand.dev/878ba9a7-6c65-4697-82ea-bf611fec68eb.png",
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/MuShibo/Micro-Wheeled_leg-Robot"
     }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
-    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/MuShibo/Micro-Wheeled_leg-Robot"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Introduction",
+            "pages": [
+              "introduction",
+              "overview"
+            ]
+          },
+          {
+            "group": "Build Guide",
+            "pages": [
+              "build/mechanical",
+              "build/electronics",
+              "build/assembly"
+            ]
+          },
+          {
+            "group": "Firmware",
+            "pages": [
+              "firmware/setup",
+              "firmware/configuration",
+              "firmware/flashing"
+            ]
+          },
+          {
+            "group": "Operation",
+            "pages": [
+              "operation/startup",
+              "operation/wifi-control",
+              "operation/tuning"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Software Reference",
+            "pages": [
+              "reference/software-architecture",
+              "reference/control-system",
+              "reference/websocket-protocol",
+              "reference/pid-parameters"
+            ]
+          },
+          {
+            "group": "Hardware Reference",
+            "pages": [
+              "reference/pcb-overview",
+              "reference/bom",
+              "reference/pin-assignments"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

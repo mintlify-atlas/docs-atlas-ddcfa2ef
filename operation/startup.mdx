@@ -1,0 +1,80 @@
+---
+title: "Powering On and Starting Up the Wheeled-Leg Robot"
+sidebarTitle: "Startup"
+description: "How to safely power on the Micro Wheeled-Leg Robot, interpret the LED status indicators, and get the robot standing upright for the first time."
+---
+
+The Micro Wheeled-Leg Robot follows a well-defined startup sequence that takes roughly 10–15 seconds from power-on to fully standing and ready for control. During that window the firmware initialises the SimpleFOC motor drivers, calibrates the IMU gyroscope offsets, moves the leg servos to their home position, and brings up the WiFi access point — all before the robot is ready to receive its first "Robot go!" command from your browser.
+
+## Startup Sequence
+
+<Steps>
+  <Step title="Connect the battery">
+    Plug the XH2.54 battery connector into the rear interface of the Controller PCB. Ensure the wires are fully seated and the locking tab clicks into place.
+  </Step>
+
+  <Step title="Turn on the power switch">
+    Flip the power switch on the Controller PCB to the **ON** position. The **red Power LED** lights up immediately, confirming the board has power.
+  </Step>
+
+  <Step title="Watch the FOC motor initialisation">
+    Both drive wheels will twitch briefly and the legs will begin moving to their home position. This is the SimpleFOC electrical-angle calibration routine — see the [FOC Initialisation](#foc-initialisation) section below for details. Wait for this phase to finish before handling the robot.
+  </Step>
+
+  <Step title="Confirm sufficient battery voltage">
+    After initialisation the firmware measures the battery voltage every 1 000 control loop cycles. If the pack is above **7.8 V**, the **blue Battery LED** lights up. If it stays off, the battery needs charging before you continue — see the warning below.
+  </Step>
+
+  <Step title="Connect to the robot's WiFi hotspot">
+    On your phone, tablet, or laptop open the WiFi settings and connect to the access point whose name starts with **WL** (default SSID: `WLROBOT`, password: `12345678`). Full connection details are covered in the [WiFi Control](/operation/wifi-control) page.
+  </Step>
+
+  <Step title="Open the browser control page">
+    In Chrome or Firefox navigate to **http://192.168.1.11**. The embedded control interface is served directly from ESP32 flash and should load within a second or two.
+  </Step>
+
+  <Step title="Stand the robot up">
+    Hold the robot upright with the wheels lightly touching a flat surface. Click the **"Robot go!"** button in the browser interface. The firmware sets `wrobot.go = 1` and the balance controllers begin driving the wheels. Release the robot — it will self-balance. Use the on-screen joystick to drive it.
+
+    <Tip>
+      Keep your fingers on the chassis, not the wheels, when pressing "Robot go!". The wheels need to be in light contact with the ground so the wheel-position zero-point is captured correctly at startup. Holding the robot a few centimetres above the floor often causes an immediate fall.
+    </Tip>
+  </Step>
+</Steps>
+
+## LED Status Indicators
+
+| LED | Colour | Meaning |
+|---|---|---|
+| Power LED | Red | Controller PCB is receiving power from the battery |
+| Battery LED | Blue | Battery pack voltage is above 7.8 V — safe to operate |
+
+<Warning>
+  The robot **must** show the blue Battery LED before you attempt to stand it up. Running the balance controllers on a low-voltage pack causes the motors to produce insufficient torque and the robot falls immediately. Charge the battery until the blue LED is lit.
+</Warning>
+
+## FOC Initialisation
+
+When the firmware starts it calls `motor1.initFOC()` and `motor2.initFOC()` for the two BLDC drive motors. SimpleFOC steps through the motor's electrical cycle to measure the zero-angle offset of each AS5600 magnetic encoder relative to the motor's flux linkage. During this phase:
+
+- Each wheel **twitches or rocks slightly** — this is expected and harmless.
+- The leg servos execute a short movement to their home position (`Position[0] = 2148`, `Position[1] = 1948`, approximately height = 26) while the firmware waits for the encoder calibration to finish.
+- The IMU gyroscope offset is calculated (`mpu6050.calcGyroOffsets(true)`) — keep the robot as still as possible during this phase; resting it on a flat surface works well.
+- The entire boot sequence takes roughly **10–15 seconds** depending on motor pole-pair alignment.
+
+Do not power-cycle the robot during FOC initialisation. If you need to restart, press the **EN (enable/reset) button** on the Controller PCB — this triggers a clean software reboot without disconnecting the battery.
+
+## Safety: Fall Detection
+
+The firmware continuously monitors the MPU6050 pitch angle (`LQR_angle = mpu6050.getAngleY()`). Two thresholds protect the robot and anything nearby:
+
+| Condition | Threshold | Action |
+|---|---|---|
+| Fall detected | `\|pitch\|` > **25°** | Motor outputs are immediately set to zero; `uncontrolable = 1` |
+| Recovery hold-off | `\|pitch\|` < **10°** | Firmware counts **200 control-loop cycles** before re-enabling output |
+
+The hold-off delay prevents the motors from violently snapping back the moment the robot is lifted upright, giving you time to reposition it safely.
+
+<Warning>
+  If the robot falls, **do not force it upright against a spinning motor**. Set it flat on the floor, wait for the wheels to stop, then pick it up and hold it upright. The firmware re-enables the balance controllers automatically once the 200-cycle hold-off expires and `wrobot.go` is still `1` in the browser interface.
+</Warning>

@@ -1,0 +1,133 @@
+---
+title: "Real-Time PID Tuning via Serial Commander"
+sidebarTitle: "PID Tuning"
+description: "Use the SimpleFOC Commander serial interface to adjust balance PID gains, low-pass filter time constants, and zero-point in real time without reflashing."
+---
+
+Balancing-robot control loops are highly sensitive to platform mechanics, battery voltage, floor surface, and leg height — parameters that change constantly during operation. The SimpleFOC **Commander** interface lets you adjust every PID gain and low-pass filter time constant live over the USB serial port while the robot is running, so you can observe the effect immediately rather than reflashing and rebooting after each change. The firmware registers twelve Commander channels (A–L) covering everything from the primary pitch angle loop to the adaptive zero-point estimator.
+
+## Commander Interface Setup
+
+Connect a USB cable between your computer and the Controller PCB's USB port. Open any serial monitor (Arduino IDE, PlatformIO, minicom, screen) and set the baud rate to **115200**. The Commander runs inside `loop()` via `command.run()`, so it processes incoming bytes every control cycle — responses are nearly instant.
+
+<Note>
+  The serial port at 115200 baud is also used by SimpleFOC's motor monitor during initialisation. You may see boot messages (encoder values, FOC calibration output) before the Commander becomes ready. Wait for the robot to finish booting before sending tuning commands.
+</Note>
+
+## Commander Channel Map
+
+Each letter corresponds to a specific controller. For PID controllers send `<letter>P`, `<letter>I`, or `<letter>D` followed by the value. For low-pass filters send `<letter>F` followed by the time constant.
+
+| Channel | Letter | Controller | Default P / I / D (or Tf) |
+|---|---|---|---|
+| pid_angle | `A` | Pitch angle error → torque command | P = 1.0 / I = 0 / D = 0 |
+| pid_gyro | `B` | Pitch rate (gyro) → torque command | P = 0.06 / I = 0 / D = 0 |
+| pid_distance | `C` | Wheel shaft position error → torque command | P = 0.5 / I = 0 / D = 0 |
+| pid_speed | `D` | Wheel shaft velocity error → torque command | P = 0.7 (adaptive) / I = 0 / D = 0 |
+| pid_yaw_angle | `E` | Accumulated yaw angle error → differential torque | P = 1.0 / I = 0 / D = 0 |
+| pid_yaw_gyro | `F` | Yaw rate (gyro Z) → differential torque | P = 0.04 / I = 0 / D = 0 |
+| lpf_joyy | `G` | Low-pass filter on joystick Y (speed command) | Tf = 0.2 s |
+| pid_lqr_u | `H` | Output non-linearity (dead-band) compensator | P = 1.0 / I = 15 / D = 0 |
+| pid_zeropoint | `I` | Adaptive pitch zero-point estimator | P = 0.002 / I = 0 / D = 0 |
+| lpf_zeropoint | `J` | Low-pass filter on zero-point distance error | Tf = 0.1 s |
+| pid_roll_angle | `K` | Roll angle error → leg height differential | P = 8.0 / I = 0 / D = 0 |
+| lpf_roll | `L` | Low-pass filter on roll angle measurement | Tf = 0.3 s |
+
+## Commander Syntax
+
+Send a single uppercase letter (channel), followed by a parameter selector, followed by the numeric value — no spaces, terminated by a newline. The SimpleFOC Commander parses the message and updates the live parameter immediately.
+
+```text
+AP1.2      → set pid_angle.P    = 1.2
+AI0.0      → set pid_angle.I    = 0.0
+AD0.0      → set pid_angle.D    = 0.0
+BP0.08     → set pid_gyro.P     = 0.08
+CP0.4      → set pid_distance.P = 0.4
+DP0.6      → set pid_speed.P    = 0.6  (overridden adaptively — see note)
+EP1.2      → set pid_yaw_angle.P = 1.2
+FP0.05     → set pid_yaw_gyro.P  = 0.05
+GF0.15     → set lpf_joyy.Tf    = 0.15
+HP1.0      → set pid_lqr_u.P    = 1.0
+HI18.0     → set pid_lqr_u.I    = 18.0
+IP0.003    → set pid_zeropoint.P = 0.003
+JF0.12     → set lpf_zeropoint.Tf = 0.12
+KP10.0     → set pid_roll_angle.P = 10.0
+LF0.25     → set lpf_roll.Tf    = 0.25
+```
+
+To **read** the current value of a channel, send just the letter followed by a question mark (e.g. `A?`). The Commander prints the current P, I, D, ramp, and limit values to the Serial Monitor.
+
+## Tuning Guide
+
+<Accordion title="Primary balance: pid_angle (A) and pid_gyro (B)">
+  These two controllers are the core of the LQR-decomposed balance loop. `pid_angle` corrects for steady-state lean and `pid_gyro` adds damping from the raw gyroscope signal.
+
+  - **Robot oscillates front-to-back with increasing amplitude** — reduce `pid_angle.P` (`AP`) or `pid_gyro.P` (`BP`). Start by reducing `pid_gyro.P` in steps of 0.01.
+  - **Robot recovers too slowly from a push** — increase `pid_angle.P` (`AP`) by 0.1 at a time.
+  - **Robot oscillates at high frequency** — reduce `pid_gyro.P`; high-frequency oscillation is usually a sign of excessive derivative-like gain.
+  - Typical working range: `pid_angle.P` ∈ [0.8, 1.5], `pid_gyro.P` ∈ [0.04, 0.12].
+</Accordion>
+
+<Accordion title="Position hold: pid_distance (C) and pid_speed (D)">
+  `pid_distance` keeps the robot from drifting away when idle. `pid_speed` tracks the joystick speed command and also brakes the robot when the joystick is released.
+
+  - **Robot drifts slowly in one direction at rest** — increase `pid_distance.P` (`CP`) slightly, or check that the floor is level.
+  - **Wheel spin-up causes oscillation on acceleration** — reduce `pid_speed.P` (`DP`). Note that `pid_speed.P` is overridden by adaptive logic during operation (see [Adaptive Speed Gain](#adaptive-speed-gain)).
+  - The distance and speed loops are disabled automatically when the wheels leave the ground (large angular acceleration detected) to prevent runaway during a jump.
+</Accordion>
+
+<Accordion title="Yaw control: pid_yaw_angle (E) and pid_yaw_gyro (F)">
+  The yaw controller runs independently of the balance loop. `pid_yaw_angle` tracks the accumulated heading error and `pid_yaw_gyro` damps the turn rate.
+
+  - **Robot slowly rotates on the spot at rest** — increase `pid_yaw_angle.P` (`EP`) to stiffen heading hold, or increase `pid_yaw_gyro.P` (`FP`) to damp unwanted rotation.
+  - **Turning response is sluggish** — reduce `pid_yaw_angle.P` slightly to loosen heading hold.
+  - Yaw output is added differentially to the two motor targets:  
+    `motor1.target ∝ −(LQR_u + YAW_output)`  
+    `motor2.target ∝ −(LQR_u − YAW_output)`
+</Accordion>
+
+<Accordion title="Motor dead-band compensation: pid_lqr_u (H)">
+  At very small torque commands the BLDC motors exhibit a dead-band where they produce no useful force. `pid_lqr_u` is a PID controller applied to the total balance output `LQR_u` when the robot is nearly upright and stationary — its integral term (default I = 15) ramps up the output voltage until the wheels actually start responding.
+
+  - **Robot rocks slowly while standing still** — reduce `pid_lqr_u.I` (`HI`) in steps of 2.
+  - **Robot stands rigidly but cannot stop creeping** — increase `pid_lqr_u.I` so it overcomes the dead-band faster.
+  - This compensator is only active when `|LQR_u| < 5` and the joystick is centred.
+</Accordion>
+
+<Accordion title="Adaptive zero-point: pid_zeropoint (I) and lpf_zeropoint (J)">
+  The firmware automatically corrects the pitch zero-point (`angle_zeropoint`, initially −2.25°) to compensate for off-centre battery weight, an uneven floor, or any small IMU mounting offset. `pid_zeropoint` drives the correction rate and `lpf_zeropoint` smooths the distance-control signal used as the error signal.
+
+  - **Robot always leans slightly forward or back at rest** — the adaptive loop should correct this automatically over a few seconds. If it never converges, increase `pid_zeropoint.P` (`IP`) from 0.002 to 0.003.
+  - **Zero-point drifts too aggressively** — reduce `pid_zeropoint.P` or increase `lpf_zeropoint.Tf` (`JF`) to slow the estimator.
+</Accordion>
+
+<Accordion title="Roll balance: pid_roll_angle (K) and lpf_roll (L)">
+  The roll controller compensates for lateral lean by differentially extending or retracting the two leg servos. `lpf_roll` smooths the MPU6050 roll measurement before it enters `pid_roll_angle`.
+
+  - **Robot leans to one side and cannot correct** — increase `pid_roll_angle.P` (`KP`).
+  - **Leg servos oscillate left-right** — reduce `pid_roll_angle.P` or increase `lpf_roll.Tf` (`LF`) to add more filtering.
+  - The roll correction output (`leg_position_add`) is subtracted from both servo positions simultaneously, so one leg extends while the other retracts.
+</Accordion>
+
+## Adaptive Speed Gain
+
+`pid_speed.P` is automatically overridden by the firmware each control cycle based on the current leg height. Taller stance geometry requires less wheel speed gain to achieve the same stabilising torque:
+
+| Height range | Automatic pid_speed.P |
+|---|---|
+| height < 50 | **0.7** (low stance — more gain needed) |
+| 50 ≤ height < 64 | **0.6** |
+| height ≥ 64 | **0.5** (tall stance — less gain needed) |
+
+```cpp
+// from lqr_balance_loop() in wl_pro_robot.ino
+if(wrobot.height < 50)       pid_speed.P = 0.7;
+else if(wrobot.height < 64)  pid_speed.P = 0.6;
+else                         pid_speed.P = 0.5;
+```
+
+Any value written to channel `D` via Commander (`DP…`) is valid only until the next loop iteration, at which point the adaptive logic overwrites it. To permanently change the speed gain for a given height range, edit the constants in `lqr_balance_loop()` and reflash.
+
+<Tip>
+  Commander changes live only in RAM — they are lost on reboot. Once you find gains that work well, copy them back into the corresponding initialiser lines in `wl_pro_robot.ino` (e.g. `PIDController pid_angle {.P = 1.2, …}`) and reflash to make them permanent.
+</Tip>

@@ -1,0 +1,161 @@
+---
+title: "Control the Robot via WiFi Browser Interface"
+sidebarTitle: "WiFi Control"
+description: "Connect to the robot's WiFi hotspot, open the browser remote control page at 192.168.1.11, and use the joystick to drive, turn, adjust height, and trigger a jump."
+---
+
+The Micro Wheeled-Leg Robot hosts a complete browser-based remote-control interface served directly from ESP32 flash memory — no app download or internet connection required. Once you join the robot's access point and navigate to its IP address, a WebSocket connection is established between your browser and the on-board WebSocket server running on port 81. Every joystick movement, height adjustment, and button press sends a small JSON message over that socket, which the firmware parses in real time through the `RobotProtocol::parseBasic()` handler.
+
+## Connecting to the Robot's WiFi
+
+The robot starts in **Access Point (AP) mode** by default.
+
+<CardGroup cols={2}>
+  <Card title="Network Credentials" icon="wifi">
+    **SSID:** `WLROBOT`  
+    **Password:** `12345678`  
+    **Robot IP:** `192.168.1.11`
+  </Card>
+  <Card title="Recommended Browsers" icon="globe">
+    Chrome or Firefox on Android, iOS, Windows, macOS, or Linux.  
+    The interface uses standard WebSocket APIs — no plugins required.
+  </Card>
+</CardGroup>
+
+**Connection steps:**
+
+1. On your device, open WiFi settings and select **WLROBOT**.
+2. Enter the password **12345678** and wait for the connection to establish.
+3. Open Chrome or Firefox and go to **http://192.168.1.11**.
+4. The robot's control page loads from ESP32 flash. The page opens a WebSocket connection to `ws://192.168.1.11:81` automatically.
+
+<Note>
+  The web interface is served by a `WebServer` instance on **port 80**. All control traffic flows through a separate `WebSocketsServer` instance on **port 81**. Both run concurrently on the ESP32 and are polled every loop iteration by `web_loop()`.
+</Note>
+
+## Control Interface Overview
+
+Once the page loads and you have pressed **"Robot go!"** (see [Startup](/operation/startup)), the following controls are available:
+
+| Control | WebSocket field | Description |
+|---|---|---|
+| **Robot go!** button | `stable` = 1 / 0 | Enables or disables the balance controllers. Press while holding the robot upright — wheels touching the ground. |
+| **Joystick X axis** | `joy_x` (integer) | Yaw / turning left and right. Positive values rotate clockwise. |
+| **Joystick Y axis** | `joy_y` (integer) | Forward and backward movement. Passed through `lpf_joyy` (Tf = 0.2) before reaching the speed controller. |
+| **Height slider** | `height` (32 – 80) | Leg extension level. 32 = maximum squat, 80 = fully extended, default = 38. |
+| **Jump** | `dir` = "jump" → "stop" | Triggers the jump sequence — see below. |
+| **Directional buttons** | `dir` = "forward" / "back" / "left" / "right" / "stop" | Discrete movement commands (supplementary to joystick). |
+
+### Leg Height and Servo Positions
+
+The `height` value maps linearly to servo positions using the formulas defined in `leg_loop()`:
+
+```
+Position[0] (ID 1, left)  = 2048 + 12 + 8.4 × (height − 32)
+Position[1] (ID 2, right) = 2048 − 12 − 8.4 × (height − 32)
+```
+
+The firmware clamps the output to safe mechanical limits:
+
+| Servo | Minimum position | Maximum position |
+|---|---|---|
+| ID 1 (left) | 2110 | 2510 |
+| ID 2 (right) | 1586 | 1986 |
+
+At the default `height = 38` the servos sit near the low end of travel, keeping the centre of mass low for stability. Increasing height raises the body and shifts the balance dynamics — the firmware compensates automatically via the [adaptive speed gain](/operation/tuning#adaptive-speed-gain).
+
+## Jump Maneuver
+
+The jump is a timed open-loop leg sequence triggered by sending `dir = "jump"` followed by `dir = "stop"`. The firmware detects the transition (`dir_last == JUMP` and `dir == STOP`) and executes `jump_loop()`:
+
+<Steps>
+  <Step title="Full extension">
+    Both servos are commanded to the maximum extension equivalent to `height = 80` at maximum speed and zero acceleration limiting. This is the "push-off" phase that launches the chassis upward.
+
+    ```
+    Position[0] = 2048 + 12 + 8.4 × (80 − 32) = 2463
+    Position[1] = 2048 − 12 − 8.4 × (80 − 32) = 1633
+    ```
+  </Step>
+
+  <Step title="Retraction (~30 loop cycles later)">
+    After `jump_flag` reaches 30 (approximately 30 ms at loop speed), the legs retract to mid height (`height = 40` equivalent) to prepare for landing.
+
+    ```
+    Position[0] = 2048 + 12 + 8.4 × (40 − 32) = 2127
+    Position[1] = 2048 − 12 − 8.4 × (40 − 32) = 1969
+    ```
+  </Step>
+
+  <Step title="Recovery hold (~200 loop cycles)">
+    `jump_flag` continues incrementing. While it is non-zero, the balance controller detects "wheels off ground" and disables the wheel-position terms to prevent erratic wheel spin on landing. Normal operation resumes once `jump_flag` exceeds 200 and resets to 0.
+  </Step>
+</Steps>
+
+## WebSocket JSON Format
+
+Every control update from the browser is a JSON object. The firmware's `webSocketEventCallback` deserialises it with ArduinoJson and routes it to `rp.parseBasic()`. A representative message looks like this:
+
+```json
+{
+  "mode": "basic",
+  "dir": "forward",
+  "height": 38,
+  "roll": 0,
+  "linear": 0,
+  "angular": 0,
+  "stable": 1,
+  "joy_x": 0,
+  "joy_y": 50
+}
+```
+
+| Field | Type | Valid values | Notes |
+|---|---|---|---|
+| `mode` | string | `"basic"` | Selects the `parseBasic()` handler |
+| `dir` | string | `"forward"`, `"back"`, `"left"`, `"right"`, `"stop"`, `"jump"` | Maps to `QR_State_t` enum (0–5) |
+| `height` | integer | 32 – 80 | Leg extension; default 38 |
+| `roll` | integer | negative/positive | Roll compensation offset |
+| `linear` | integer | negative/positive | Forward speed bias |
+| `angular` | integer | negative/positive | Angular speed bias |
+| `stable` | integer | `0` or `1` | Enables (`1`) or disables (`0`) balance output |
+| `joy_x` | integer | negative/positive | Yaw axis; fed into `yaw_loop()` |
+| `joy_y` | integer | negative/positive | Speed axis; filtered by `lpf_joyy` |
+
+## STA Mode — Join an Existing Network
+
+By default the robot creates its own hotspot. To connect it to a home or lab network instead, switch it to **Station (STA) mode**:
+
+<Steps>
+  <Step title="Edit wifi.cpp">
+    Open `3.Software/wl_pro_robot/wifi.cpp` and update the STA credentials:
+
+    ```cpp
+    char *sta_ssid     = "YourNetworkName";
+    char *sta_password = "YourNetworkPassword";
+    ```
+  </Step>
+
+  <Step title="Switch the WiFi init call">
+    In `wl_pro_robot.ino`, comment out `WiFi_SetAP()` and uncomment `set_sta_wifi()` in `setup()`:
+
+    ```cpp
+    // WiFi_SetAP();
+    set_sta_wifi();   // join existing network
+    ```
+  </Step>
+
+  <Step title="Flash and find the IP">
+    Compile and flash the firmware. After boot, open your router's DHCP client list to find the IP address the robot was assigned. The Serial Monitor (115200 baud) also prints it:
+
+    ```
+    IP Address: 192.168.x.x
+    ```
+
+    Navigate to that address in your browser instead of `192.168.1.11`.
+  </Step>
+</Steps>
+
+<Note>
+  In STA mode you can connect multiple devices to the robot simultaneously through your router, and the robot has internet access if needed for future firmware features. AP mode is simpler and requires no router.
+</Note>

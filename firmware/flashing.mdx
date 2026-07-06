@@ -1,0 +1,107 @@
+---
+title: "Flash Firmware to the ESP32 Controller Board"
+sidebarTitle: "Flashing"
+description: "Connect the Controller PCB via Micro-USB, select the correct COM port in Arduino IDE, and upload the firmware to the ESP32."
+---
+
+With the Arduino IDE configured, libraries installed, and your WiFi and balance parameters set, you are ready to compile and flash the firmware to the ESP32 Controller PCB. Flashing is done over the Micro-USB port on the controller board — no external programmer is required. The entire process takes about one to two minutes on a typical machine.
+
+<Steps>
+  <Step title="Connect the Controller PCB via Micro-USB">
+    Use a Micro-USB cable to connect the Controller PCB to your computer. The **red power LED** on the board will illuminate once USB power is detected. Make sure you are using a data-capable cable — charge-only cables will not expose a serial port to the host computer.
+  </Step>
+
+  <Step title="Select the correct serial port">
+    In Arduino IDE, open **Tools → Port** and select the port that corresponds to the ESP32. 
+
+    - **Windows:** look for a `COM` port (e.g. `COM3`, `COM5`) that appeared after plugging in the cable
+    - **macOS:** look for `/dev/cu.usbserial-XXXX` or `/dev/cu.SLAB_USBtoUART`
+    - **Linux:** look for `/dev/ttyUSB0` or `/dev/ttyACM0`
+
+    If no new port appeared, your cable may be charge-only, or the CP210x / CH340 USB-to-serial driver may need to be installed separately for your operating system.
+  </Step>
+
+  <Step title="Verify the sketch compiles cleanly">
+    Before uploading, confirm the sketch compiles without errors by selecting **Sketch → Verify/Compile** (or pressing **Ctrl+R** / **Cmd+R**). 
+
+    The compiler output panel at the bottom of the IDE will show memory usage on success. If it reports errors about missing libraries, revisit the [Dev Environment](/firmware/setup) page and confirm all four ZIP libraries were installed correctly.
+  </Step>
+
+  <Step title="Upload the firmware">
+    Click **Sketch → Upload** (or press **Ctrl+U** / **Cmd+U**). Arduino IDE will compile the sketch, then begin transferring the binary to the ESP32 over the serial port at 921600 baud.
+
+    You will see a progress bar in the output panel. Lines like `Writing at 0x00001000... (3 %)` confirm that data is being written to flash. The full upload typically takes 20–40 seconds.
+  </Step>
+
+  <Step title="Observe the post-flash boot sequence">
+    Once the upload bar reaches 100%, the IDE prints **Hard resetting via RTS pin…** and the ESP32 reboots automatically. At this point:
+
+    1. The **red power LED** stays on, confirming the board is live.
+    2. The wheel motors will twitch briefly as SimpleFOC runs its FOC encoder alignment routine (this is normal — the `motor1.initFOC()` / `motor2.initFOC()` calls fire during `setup()`).
+    3. The leg servos move to their startup positions: ID1 → position 2148, ID2 → position 1948.
+    4. WiFi starts up (AP mode by default: SSID `WLROBOT`, password `12345678`).
+    5. If battery voltage is above 7.8 V, the **blue LED** (GPIO 13) lights up.
+  </Step>
+
+  <Step title="Open the Serial Monitor to confirm a clean boot">
+    In Arduino IDE, open **Tools → Serial Monitor** and set the baud rate to **115200**. During boot you will see output from the SimpleFOC library confirming motor initialisation, followed by periodic battery voltage readings once the main loop starts. A successful boot log looks similar to:
+
+    ```
+    MOT: Monitor enabled!
+    MOT: Init
+    MOT: Enable driver.
+    MOT: Align sensor.
+    MOT: aligning to zero...
+    MOT: Success: 2
+    MOT: MOT: Monitor enabled!
+    MOT: Init
+    ...
+    7.95
+    7.95
+    ```
+
+    The floating-point lines at the end are the battery voltage printed once per 1000 loop iterations. If you see only a blank monitor or garbage characters, confirm the baud rate is set to 115200.
+  </Step>
+</Steps>
+
+<Note>
+  After the initial flash, press the **EN** (enable/reset) button on the ESP32 module to perform a clean software restart before connecting to the robot's WiFi. The EN button is labelled on the Controller PCB. The README also recommends this step to ensure the WiFi AP is fully initialised before you attempt to open the web control interface at `192.168.1.11`.
+</Note>
+
+---
+
+## Serial Monitor Output During Boot
+
+The boot sequence has three distinct phases you can observe in the Serial Monitor:
+
+1. **FOC alignment** — SimpleFOC drives a small current through each motor phase to detect the encoder's electrical zero. The wheels will twitch or rotate slightly. This lasts 1–3 seconds per motor. Both motors must complete this before the main loop begins.
+
+2. **Servo initialisation** — Immediately after FOC, `setup()` sends a `SyncWritePosEx` command to the STS3032 servos at ACC=30, Speed=300, moving them to the starting leg positions. You will hear the servos step to position.
+
+3. **WiFi AP start** — The ESP32 brings up the `WLROBOT` hotspot. No explicit confirmation is printed in the default firmware (the Serial.println lines in `WiFi_SetAP()` are commented out), but the AP becomes visible in your device's WiFi list within a few seconds of boot completing.
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Upload fails with 'No serial data received' or times out">
+    The ESP32 did not enter bootloader mode in time. Hold the **BOOT** button on the ESP32 module, then click **Upload** in Arduino IDE. Once you see `Connecting......` in the output panel, release the BOOT button. This forces the chip into download mode. On the Controller PCB, the BOOT button may be labelled `IO0`.
+  </Accordion>
+
+  <Accordion title="Compilation error: 'WebSocketsServer.h: No such file or directory'">
+    The WebSockets library is missing or the wrong version is installed. Go to **Sketch → Include Library → Add .ZIP Library…** and select `3.Software/libraries/WebSockets.zip`. If you previously installed a WebSockets library from the Library Manager, remove it first via **Tools → Manage Libraries** to avoid conflicts.
+  </Accordion>
+
+  <Accordion title="Compilation error: 'SimpleFOC.h: No such file or directory'">
+    The SimpleFOC library was not installed. Go to **Sketch → Include Library → Add .ZIP Library…** and select `3.Software/libraries/Simple_FOC.zip`. If you have a different version of SimpleFOC already installed via the Library Manager, it may conflict — remove it and use only the bundled ZIP.
+  </Accordion>
+
+  <Accordion title="Robot falls immediately after standing up">
+    The `angle_zeropoint` value does not match your specific robot's IMU mounting position. While holding the robot upright by hand, open the Serial Monitor and observe the raw pitch angle being reported. Set `angle_zeropoint` in `wl_pro_robot.ino` to that value, reflash, and test again. See [Configuration — Balance Zero-Point](/firmware/configuration#balance-zero-point) for detailed instructions.
+  </Accordion>
+
+  <Accordion title="Blue LED does not light after boot">
+    The battery voltage read by ADC1 channel 7 (GPIO 35) is at or below the 7.8 V threshold. Charge the 2S LiPo battery before operating the robot. Running below 7.4 V per cell can also reduce motor torque and cause instability even if the robot manages to stand.
+  </Accordion>
+</AccordionGroup>

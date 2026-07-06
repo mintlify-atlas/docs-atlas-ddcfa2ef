@@ -1,0 +1,70 @@
+---
+title: "Bill of Materials for the Micro Wheeled-Leg Robot"
+sidebarTitle: "BOM"
+description: "Complete bill of materials for the Micro Wheeled-Leg Robot: purchased components, fabricated parts, PCBs, cables, and hardware fasteners."
+---
+
+The Micro Wheeled-Leg Robot BOM is split into two categories: **purchased components** that you source from suppliers, and **fabricated parts** that you manufacture yourself through 3D printing, CNC machining, or laser/water-jet cutting. In addition, four custom PCBs must be ordered from Gerber files. The tables below list all items. For precise motor specifications and any part numbers not listed here, refer to the `BOM.xlsx` spreadsheet in the project repository.
+
+<Note>
+  The full `BOM.xlsx` spreadsheet — including motor specs, exact hardware fastener counts, and supplier part numbers — is available in the [Micro-Wheeled\_leg-Robot GitHub repository](https://github.com/MuShibo/Micro-Wheeled_leg-Robot). Always cross-reference the spreadsheet for the most up-to-date quantities and substitutions.
+</Note>
+
+---
+
+## Purchased Components
+
+These parts are bought off-the-shelf and assembled onto or into the robot.
+
+| Item | Qty | Notes |
+|------|-----|-------|
+| BLDC hub motors (small, for wheels) | 2 | Exact motor model and KV rating in `BOM.xlsx` |
+| FEETECH STS3032 bus servo | 2 | One per leg joint; left servo ID = 1, right servo ID = 2 |
+| 2S LiPo battery with XH2.54 plug | 1 | ~7.4 V nominal, ~250–500 mAh recommended; verify connector polarity before first use |
+| GH1.25 4-pin double-ended cable, 15 cm | 3 | Left encoder → Controller, right encoder → Controller, IMU → Controller |
+| AS5600 disc magnet (diametrically magnetised) | 2 | Glued to motor shaft end; gap to AS5600 PCB should be 0.5–2 mm |
+| M2 screws and standoffs | — | Quantities and lengths per 3D assembly model |
+| M3 screws and standoffs | — | Quantities and lengths per 3D assembly model |
+| Bearings (press-fit for leg joints) | — | Bearing inner/outer dimensions specified in 3D model |
+
+<Warning>
+  When sourcing the L6234PD013TR motor driver ICs for the Controller PCB, purchase only from authorised ST Microelectronics distributors (e.g. Mouser, DigiKey, or LCSC). Counterfeit L6234 parts are widely available on secondary markets and may appear functional but fail under PWM load, causing erratic motor behaviour or immediate component damage.
+</Warning>
+
+---
+
+## Fabricated Parts
+
+The mechanical structure of the robot is a combination of 3D-printed polymer parts and precision-machined metal components. Nylon powder (SLS) is the recommended material for the printed leg parts because of its toughness and dimensional accuracy, but PLA or PETG can be used for prototyping.
+
+| Part | Qty | Method |
+|------|-----|--------|
+| Calf | 1 | 3D print (nylon powder recommended) |
+| Calf\_MIR | 1 | 3D print (mirror of Calf) |
+| Thigh | 1 | 3D print (nylon powder recommended) |
+| Thigh\_MIR | 1 | 3D print (mirror of Thigh) |
+| ThighCover | 1 | 3D print |
+| ThighCover\_MIR | 1 | 3D print (mirror of ThighCover) |
+| ColumnCover | 2 | 3D print |
+| Hub | 2 | 3D print (one per wheel motor) |
+| PCBCover | 1 | 3D print (optional protective cover for Controller PCB) |
+| BodyBase | 1 | CNC machined — steel |
+| MotorBase | 1 | CNC machined — aluminium 6061 |
+| Carbon fiber panel | 1 set | Laser-cut or water-jet cut from carbon fiber sheet |
+
+All 3D print source files and machining drawings are located in the `1.Mechanical/Parts-Manufactured/` folder of the repository. The complete robot assembly model (`OriginalRobotModel.stp`) can be opened in any STEP-compatible CAD tool (e.g. Fusion 360, FreeCAD, SolidWorks) to verify part fits and tolerances before fabrication.
+
+---
+
+## Custom PCBs
+
+Four custom PCBs must be fabricated and assembled. Gerber files for each board are located under `2.Hardware/`. All boards are designed for standard 2-layer, 1.6 mm FR-4 process. See the [PCB Overview](/reference/pcb-overview) page for full component details and fabrication notes.
+
+| PCB | Gerber File | BOM File |
+|-----|------------|----------|
+| Controller PCB | `Gerber_PCB_Controller.zip` | `BOM_PCB_Controller.csv` |
+| Encoder PCB | `Gerber_PCB_Encoder.zip` | `BOM_PCB_Encoder.csv` |
+| IMU PCB | `Gerber_PCB_IMU.zip` | `BOM_PCB_IMU.csv` |
+| Servo Debug PCB | `Gerber_PCB_ServoDebug.zip` | `BOM_ServoDebug.csv` |
+
+Order **two** Encoder PCBs (one per motor). All other PCBs require only a single unit. The CSV BOMs include LCSC part numbers and are compatible with JLCPCB's SMT assembly upload workflow.

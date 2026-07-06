@@ -1,0 +1,110 @@
+---
+title: "Assembling the Micro Wheeled-Leg Robot"
+sidebarTitle: "Assembly"
+description: "Step-by-step robot assembly: mounting motors and PCBs, routing cables, setting servo IDs, and performing a pre-power-on checklist."
+---
+
+With all fabricated and purchased parts in hand, assembly follows a logical bottom-up sequence: the steel BodyBase and aluminum MotorBase form the structural core first, the leg linkages and motors attach next, then the electronics stack is mounted and wired, and finally the covers are fitted. Read through the complete sequence before starting — several steps (encoder magnet curing, servo ID assignment) must happen at specific points in the order and cannot easily be done after the robot is fully assembled.
+
+## Assembly Sequence
+
+<Steps>
+  <Step title="Mount MotorBase to BodyBase">
+    Attach the aluminum MotorBase to the steel BodyBase using the M-screws shown in `OriginalRobotModel.stp`. Torque all fasteners evenly; the MotorBase locates the motors relative to the leg pivot axes, so misalignment here propagates through the entire kinematic chain.
+  </Step>
+
+  <Step title="Press-fit bearings into Thigh and Calf parts">
+    Use a **flat-jaw vise** to press the bearings into the Thigh, Thigh_MIR, Calf, and Calf_MIR 3D-printed parts. Place a flat plate between the vise jaw and the bearing outer race to distribute load evenly. Do not hammer — the impulse load can crack SLS nylon around the bearing bore. Press slowly until the bearing is fully seated (flush with or just below the part face).
+  </Step>
+
+  <Step title="Install BLDC motors and glue encoder magnets">
+    Seat the BLDC motors into the MotorBase bores. Before bolting them down, bond the AS5600 diametrically-magnetized disc magnets to each motor shaft end face using **cyanoacrylate (502 glue)**. Center each magnet on the shaft face, hold for 60 seconds, and allow a minimum of 5 minutes for full cure before proceeding. See the [Mechanical Parts](/build/mechanical) page for detailed magnet alignment guidance.
+  </Step>
+
+  <Step title="Mount Encoder PCBs above motor shafts">
+    Fasten one Encoder PCB directly above each motor shaft end. The **axial gap between the AS5600 sensor face and the magnet surface must be 0.5–2 mm**. Use shim washers or the PCB standoff height to hit this range. Confirm alignment by gently rotating each motor shaft by hand — the magnet should stay concentric under the sensor.
+
+    <Tip>
+      After mounting, rotate each shaft slowly through a full revolution by hand and verify with a multimeter (or later in firmware) that the AS5600 reports a smooth, monotonic angle sweep with no jumps. A jumping output almost always means the air gap is too large or the magnet is off-center.
+    </Tip>
+  </Step>
+
+  <Step title="Install FEETECH STS3032 servos into leg joints">
+    Mount the STS3032 servos into the hip joint positions per the 3D model. **The left servo must be assigned ID 1 and the right servo ID 2** before final installation — see the **Servo ID Configuration** section below. Perform ID assignment now, before the servos are enclosed by covers, when re-connecting the debug cable is still straightforward.
+  </Step>
+
+  <Step title="Attach carbon fiber panels and 3D-printed covers">
+    Fit the carbon fiber Panel parts to the BodyBase frame. Then clip on the ColumnCover ×2, ThighCover, and ThighCover_MIR printed covers. If you printed PCBCover (optional), set it aside until after the electronics are fully wired and tested.
+  </Step>
+
+  <Step title="Mount Controller PCB and route GH1.25 cables">
+    Fasten the Controller PCB to its mount on the BodyBase. Then plug in the three **GH1.25 4PIN 15 cm cables**:
+
+    - **Cable 1** — Left Encoder PCB → Controller I2C bus 0 header (GPIO 19 SDA / GPIO 18 SCL)
+    - **Cable 2** — Right Encoder PCB → Controller I2C bus 1 header (GPIO 23 SDA / GPIO 5 SCL)
+    - **Cable 3** — IMU PCB → Controller I2C bus 1 header (same bus as right encoder)
+
+    Route cables away from rotating motor shafts and fold excess length neatly behind the PCB stack.
+  </Step>
+
+  <Step title="Connect Servo Debug PCB inline on the servo wiring">
+    Wire the Servo Debug PCB between the Controller PCB's Serial2 output and the STS3032 servo chain. The Serial2 bus runs at **1 Mbaud**. Refer to `2.Hardware/4.ServoDebugPCB/SpecialInstruction.png` for the exact pin connections on the debug board — the half-duplex switching wiring is shown there in detail.
+  </Step>
+
+  <Step title="Set servo IDs using FEETECH Debug Software">
+    If not done in Step 5, connect each STS3032 individually to the [FEETECH FD Debug Software](https://gitee.com/ftservo/fddebug) via the Servo Debug PCB and USB-to-serial adapter. Assign:
+
+    - **Left servo → ID 1**
+    - **Right servo → ID 2**
+
+    Then, with each servo connected individually, drive it to the **fully-squatted mechanical stop position** and set the position register to **2048**. This calibration value is the zero-reference that the firmware uses for leg height control.
+  </Step>
+
+  <Step title="Connect the battery and verify polarity">
+    Plug the 2S LiPo battery's **XH2.54 connector** into the rear battery port on the Controller PCB.
+
+    <Warning>
+      **Always verify polarity before connecting any battery.** The XH2.54 connector is not keyed against reversal. Check the positive (+) and negative (−) pins against the silkscreen on the Controller PCB. Reversed polarity will immediately destroy the L6234 motor drivers and the ESP32. If your battery is not from the recommended BOM.xlsx link, treat its plug wiring as unknown and probe with a multimeter before mating.
+    </Warning>
+
+    After confirming polarity, plug in the battery and flip the power switch. The red power LED should illuminate. The wheels will perform a brief FOC initialization sequence (each wheel moves slightly), and the legs will cycle through an initialization motion. If the battery is adequately charged, the blue `LED_BAT` on GPIO 13 will also light up.
+  </Step>
+</Steps>
+
+---
+
+## Servo ID Configuration
+
+The firmware expects a fixed servo ID assignment: **left servo = ID 1, right servo = ID 2**. Swapping the IDs will invert leg direction commands and make the robot fall immediately on startup.
+
+Use the [FEETECH FD Debug Software](https://gitee.com/ftservo/fddebug) to configure each servo:
+
+1. Connect one servo at a time to your PC through the Servo Debug PCB and a USB-to-serial adapter.
+2. Open FD Debug Software and scan for the servo at its factory default ID.
+3. Change the ID to **1** (left) or **2** (right) as appropriate.
+4. Drive the servo to the fully-squatted position — the leg linkage pressed gently against its mechanical hard stop.
+5. Write **2048** to the servo's present-position offset / origin register. This value is what the balance controller uses as the zero reference for leg height.
+6. Repeat for the second servo.
+
+```text
+Left servo   →  ID 1,  calibration position = 2048 (fully squatted)
+Right servo  →  ID 2,  calibration position = 2048 (fully squatted)
+```
+
+---
+
+## Cable Routing
+
+Three GH1.25 4PIN double-ended cables (recommended length: **15 cm** each) connect the encoder and IMU PCBs back to the Controller PCB. Keep the following bus assignments in mind when labeling or color-coding your cables:
+
+| Cable | From | To | ESP32 Pins | Bus |
+|---|---|---|---|---|
+| Left encoder | Encoder PCB (left wheel) | Controller I2C-0 header | GPIO 19 (SDA) / GPIO 18 (SCL) | I2C bus 0 |
+| Right encoder | Encoder PCB (right wheel) | Controller I2C-1 header | GPIO 23 (SDA) / GPIO 5 (SCL) | I2C bus 1 |
+| IMU | IMU PCB | Controller I2C-1 header | GPIO 23 (SDA) / GPIO 5 (SCL) | I2C bus 1 (shared) |
+
+The STS3032 servo chain uses **Serial2** at **1 Mbaud**, routed through the Servo Debug PCB before reaching the servos.
+
+<Note>
+  The 15 cm cable length is a recommendation, not a strict requirement. Shorter cables reduce capacitive loading on the I2C lines; longer cables (beyond ~20 cm) at 400 kHz I2C clock may require pull-up resistors to be reduced from the default values. Stick to 15 cm when in doubt.
+</Note>

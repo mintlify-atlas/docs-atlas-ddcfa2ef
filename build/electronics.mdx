@@ -1,0 +1,116 @@
+---
+title: "PCB Fabrication and Electronics for the Wheeled-Leg Robot"
+sidebarTitle: "Electronics"
+description: "Order, assemble, and verify all four custom PCBs — Controller, Encoder, IMU, and Servo Debug — using the provided Gerber files and BOMs."
+---
+
+The Micro Wheeled-Leg Robot uses four custom PCBs that work together to drive the BLDC wheel motors, read wheel angles, measure body attitude, and communicate with the leg servos. All design files — Gerber ZIPs, BOM CSVs, and EasyEDA/LCEDA JSON source files — are organized under `2.Hardware/`, with one subfolder per board. The schematics were drawn in [LCEDA](https://lceda.cn/), a free browser-based EDA tool, so you can open and modify any board without a paid license.
+
+<CardGroup cols={2}>
+  <Card title="Controller PCB" icon="microchip">
+    ESP32-WROOM-32 MCU with dual L6234PD013TR 3-phase brushless motor drivers, 2S LiPo power input, Micro-USB programming port, and battery-level monitoring. Located in `2.Hardware/1.ControllerPCB/`.
+  </Card>
+  <Card title="Encoder PCB" icon="rotate">
+    AS5600 magnetic angle sensor for one wheel shaft. Two boards are required — one per wheel. Communicates over I2C via GH1.25 4PIN cable to the controller. Located in `2.Hardware/2.EncoderPCB/`.
+  </Card>
+  <Card title="IMU PCB" icon="compass">
+    MPU6050 6-axis inertial measurement unit that provides pitch, roll, and yaw data for the balance controller. Shares the I2C bus with the right-side encoder. Located in `2.Hardware/3.IMUPCB/`.
+  </Card>
+  <Card title="Servo Debug PCB" icon="sliders">
+    Time-division multiplexer that converts the ESP32's full-duplex UART into the half-duplex single-wire protocol required by FEETECH STS3032 bus servos. Located in `2.Hardware/4.ServoDebugPCB/`.
+  </Card>
+</CardGroup>
+
+---
+
+## Controller PCB
+
+The Controller PCB is the brain of the robot. Its source files live in `2.Hardware/1.ControllerPCB/`.
+
+**Microcontroller — ESP32-WROOM-32**
+
+The ESP32-WROOM-32 handles all real-time control loops (FOC for two BLDC motors, PD balance controller, servo position commands) as well as a WebSocket server that streams JSON telemetry to a browser-based remote-control interface. Programming is done over the on-board Micro-USB connector; select the **ESP32 Dev Module** board in Arduino IDE with the **recommended esp32 core version 2.0.3**.
+
+**Brushless Motor Driver — L6234PD013TR ×2**
+
+Two L6234PD013TR ICs provide three-phase half-bridge drive for the two BLDC wheel motors. Each IC drives one motor and is controlled by SimpleFOC via the ESP32's PWM outputs.
+
+<Warning>
+  **Beware counterfeit L6234 chips.** The L6234PD013TR is widely counterfeited on Taobao and similar marketplaces. Counterfeit parts often fail immediately under load or produce asymmetric phase drive that makes FOC tuning impossible. Purchase from a reputable distributor (e.g., Mouser, DigiKey, or a verified LCSC listing). If the robot's wheels oscillate violently or the IC runs abnormally hot at low duty cycles, suspect a fake chip.
+</Warning>
+
+**Power System**
+
+| Feature | Detail |
+|---|---|
+| Battery connector | XH2.54, rear of board |
+| Battery chemistry | 2S LiPo (≈ 7.4 V nominal) |
+| Power switch | On-board slide switch |
+| Battery voltage monitor | Resistor divider: 100 kΩ + 40.2 kΩ → ADC pin 35 |
+| Battery LED | `LED_BAT` on GPIO 13 (blue) — lights when charge is sufficient |
+| Power LED | Red LED — lights whenever the switch is ON |
+| Reset button | `EN` button triggers ESP32 hardware reset |
+
+<Note>
+  The power-supply polarity silkscreen on the board has been corrected in the current revision. If you are using the battery linked in `BOM.xlsx`, the plug polarity is correct. **If you source a battery from any other supplier, verify the XH2.54 pin polarity against the board silkscreen before connecting.** Reversed polarity will instantly destroy the L6234 drivers and potentially the ESP32.
+</Note>
+
+---
+
+## Encoder PCB
+
+Source files: `2.Hardware/2.EncoderPCB/`
+
+Each Encoder PCB carries one **AS5600** magnetic angle sensor. The AS5600 is a 12-bit contactless encoder that reads the rotating magnetic field of the disc magnet glued to the motor shaft end face (see [Mechanical Parts](/build/mechanical) for magnet installation). Two identical boards are required — one for the left wheel and one for the right wheel.
+
+**Interface**
+
+The AS5600 communicates over **I2C**. Each Encoder PCB connects to the Controller PCB via a **GH1.25 4PIN double-ended cable** (recommended length: 15 cm):
+
+- Left encoder → I2C bus 0 (ESP32 GPIO 19 SDA / GPIO 18 SCL)
+- Right encoder → I2C bus 1 (ESP32 GPIO 23 SDA / GPIO 5 SCL), shared with the IMU PCB
+
+**Mounting clearance**
+
+Mount each Encoder PCB directly above its motor shaft so that the AS5600 sensor face sits **0.5–2 mm** from the magnet surface. Outside this range the sensor reports reduced accuracy or fails to lock on to the magnetic field.
+
+---
+
+## IMU PCB
+
+Source files: `2.Hardware/3.IMUPCB/`
+
+The IMU PCB hosts an **MPU6050** module — a 6-axis MEMS device combining a 3-axis gyroscope and 3-axis accelerometer. The balance controller reads the fused pitch angle (rotation about the Y-axis / wheel axle axis) to compute the torque commands needed to keep the robot upright. Roll (X-axis) and yaw (Z-axis) data are also available and used for steering and turn-rate control.
+
+The MPU6050 **shares I2C bus 1** (GPIO 23 SDA / GPIO 5 SCL) with the right-side Encoder PCB. Both devices have fixed I2C addresses that do not conflict, so no address-selection resistors are needed.
+
+---
+
+## Servo Debug PCB
+
+Source files: `2.Hardware/4.ServoDebugPCB/`
+
+The FEETECH STS3032 is a smart serial bus servo that uses a **half-duplex single-wire UART** protocol. The ESP32's hardware UART (Serial2) is full-duplex (separate TX and RX lines). The Servo Debug PCB bridges this gap using **SN74LVC1G125** (buffer, active-low enable) and **SN74LVC1G126** (buffer, active-high enable) ICs to implement time-division multiplexing: the ESP32 drives one direction at a time and the PCB asserts the correct buffer direction automatically.
+
+<Note>
+  Review `2.Hardware/4.ServoDebugPCB/SpecialInstruction.png` before soldering or connecting this board. It contains a wiring diagram specific to the half-duplex switching circuit that is not fully captured in the main schematic PDF.
+</Note>
+
+---
+
+## Ordering PCBs
+
+All four boards can be ordered from any standard PCB fab. [JLCPCB](https://jlcpcb.com/) and [PCBWay](https://www.pcbway.com/) both accept the provided Gerber ZIP files directly.
+
+**Files to provide to the fab:**
+
+| Board | Gerber ZIP | BOM CSV |
+|---|---|---|
+| Controller | `2.Hardware/1.ControllerPCB/Gerber_PCB_Controller.zip` | `BOM_PCB_Controller.csv` |
+| Encoder (×2) | `2.Hardware/2.EncoderPCB/Gerber_PCB_Encoder.zip` | `BOM_PCB_Encoder.csv` |
+| IMU | `2.Hardware/3.IMUPCB/Gerber_PCB_IMU.zip` | `BOM_PCB_IMU.csv` |
+| Servo Debug | `2.Hardware/4.ServoDebugPCB/Gerber_PCB_ServoDebug.zip` | `BOM_ServoDebug.csv` |
+
+**Editing schematics or layout**
+
+The JSON source files (e.g., `SCH_WLRobot.json`, `PCB_WLRobot.json`) are in **EasyEDA/LCEDA format**. Import them into [LCEDA](https://lceda.cn/) via **File → Import → EasyEDA**. LCEDA is free and runs entirely in the browser — no installation required.

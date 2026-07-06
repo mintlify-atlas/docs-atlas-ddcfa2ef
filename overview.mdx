@@ -1,0 +1,102 @@
+---
+title: "System Architecture and Component Overview"
+sidebarTitle: "Overview"
+description: "A complete map of the Micro Wheeled-Leg Robot subsystems: mechanical structure, four custom PCBs, ESP32 firmware modules, and the WiFi control stack."
+---
+
+The Micro Wheeled-Leg Robot is best understood as three interlocking layers: a mechanical structure that defines range of motion and rigidity; a hardware stack of four custom PCBs that handle power, motor drive, angle sensing, IMU data, and servo multiplexing; and a firmware stack running entirely on the ESP32 that closes the balance loop, steers the robot, moves the legs, and streams a control interface to any nearby browser. Understanding how these layers interact is the fastest path to modifying, tuning, or extending the platform.
+
+## Mechanical Subsystem
+
+The robot's chassis combines three materials to balance stiffness, weight, and machinability. A steel body base (`BodyBase-Steel.stp`) provides a low center of gravity and mounting rigidity. Aluminum 6061 motor mounts (`MotorBase-Aluminum6061.stp`) hold the brushless wheel motors at the correct geometry. Carbon fiber panels (defined in `Panel.dwg` / `Panel.pdf`) enclose the electronics bay while minimizing added mass.
+
+The leg assemblies are built from nine 3D-printed parts:
+
+| Part | Qty | Role |
+|---|---|---|
+| `Thigh` | 1 | Left thigh link connecting servo horn to lower leg |
+| `Thigh_MIR` | 1 | Right-side mirror of the thigh link |
+| `ThighCover` | 1 | Cosmetic cover for the left thigh |
+| `ThighCover_MIR` | 1 | Cosmetic cover for the right thigh |
+| `Calf` | 1 | Left lower leg link terminating at the wheel axle |
+| `Calf_MIR` | 1 | Right-side mirror of the calf link |
+| `ColumnCover` | 2 | Pair of column shrouds for the servo mast |
+| `Hub` | 2 | Wheel hubs that mate the BLDC motor shaft to the tyre |
+
+The complete parametric assembly is archived as `OriginalRobotModel.stp` in the `1.RobotModel` directory and can be opened in any STEP-compatible CAD tool for measurement or modification.
+
+<Tip>
+  The servo effective travel is 450 steps from the fully-squatted mechanical limit (position 2048). Left servo positions range from 2110 to 2510; right servo positions range from 1586 to 1986. Stay within these limits to avoid binding the leg joints.
+</Tip>
+
+## Electronics Subsystem
+
+Four custom PCBs, all designed in [LCEDA](https://lceda.cn/) with full schematic and layout source files provided, make up the complete electronics stack.
+
+| PCB | Purpose | Key ICs |
+|---|---|---|
+| Controller PCB | Main brain: runs ESP32, drives both BLDC motors, monitors battery voltage via ADC pin 35, exposes USB and UART for programming and serial tuning | ESP32-WROOM-32, L6234PD013TR ×2 |
+| Encoder PCB | Reads absolute wheel shaft angle over I²C for each motor; two identical boards, one per side | AS5600 ×2 |
+| IMU PCB | Provides pitch, roll, and yaw angle and rate data; shares the right-encoder I²C bus at 400 kHz | MPU6050 module |
+| Servo Debug PCB | Merges the two STS3032 half-duplex serial lines into one UART signal through time-division multiplexing so the ESP32 can address both servos on a single `Serial2` port | SN74LVC1G125DBV, SN74LVC1G126DBV |
+
+Boards are interconnected with GH1.25 4-pin double-ended cables (recommended length 15 cm). A battery voltage threshold of 7.8 V controls the blue LED on the controller board: the LED illuminates when the pack is sufficiently charged and extinguishes when charging is needed.
+
+<Warning>
+  The recommended ESP32 Arduino core version is **2.0.3**. Use the bundled WebSocket library from `3.Software/libraries` rather than the library manager version; later core releases may introduce breaking API changes that prevent the WebSocket server from starting correctly.
+</Warning>
+
+## Firmware Modules
+
+All firmware lives in the `3.Software/wl_pro_robot/` directory and is compiled with the Arduino IDE targeting the ESP32 board package.
+
+| File | Responsibility |
+|---|---|
+| `wl_pro_robot.ino` | Entry point: instantiates all objects, runs `setup()` for peripheral initialization, and drives the main `loop()` calling every subsystem in sequence |
+| `robot.cpp` / `robot.h` | Defines the `Wrobot` struct (command state: `height`, `roll`, `linear`, `angular`, `dir`, `joyx`, `joyy`, `go`) and the `RobotProtocol` class with `parseBasic()` for JSON decoding and `spinOnce()` for periodic protocol updates |
+| `wifi.cpp` / `wifi.h` | Provides `WiFi_SetAP()` (AP mode, robot becomes its own hotspot) and `set_sta_wifi()` (STA mode, robot joins an existing network) |
+| `Servo_STS3032.cpp` / `Servo_STS3032.h` | SMS_STS driver for FEETECH STS3032 bus servos over Serial2 at 1 Mbaud; exposes `SyncWritePosEx()` for simultaneous position, speed, and acceleration commands to multiple servo IDs |
+| `basic_web.h` | Embeds the complete single-page HTML/JavaScript remote control interface as a C string stored in ESP32 flash; served by the HTTP server on port 80 |
+
+## Control Architecture
+
+The balance and motion control pipeline is a cascade of feedback loops, each producing a reference or correction for the layer below it.
+
+The **MPU6050** provides raw pitch angle and pitch rate (Y-axis), roll angle (X-axis), and yaw angle and yaw rate (Z-axis) after automatic gyro offset calibration during `setup()`.
+
+The **LQR pitch balance loop** (`lqr_balance_loop()`) combines four proportional terms — pitch angle error (`pid_angle`), pitch rate (`pid_gyro`), wheel displacement error (`pid_distance`), and wheel speed error (`pid_speed`) — into a single scalar torque demand `LQR_u`. When the robot is near equilibrium and the joystick is neutral, an integrating stage (`pid_lqr_u`) compensates low-torque motor nonlinearity, and `pid_zeropoint` trims the balance angle setpoint to track the true center of gravity.
+
+The **PID yaw steering loop** (`yaw_loop()`) accumulates heading error from `getAngleZ()` and adds a joystick-commanded heading rate. Its output `YAW_output` is added differentially: `motor1.target = -0.5 × (LQR_u + YAW_output)` and `motor2.target = -0.5 × (LQR_u - YAW_output)`.
+
+The **leg height loop** (`leg_loop()`) maps the WebSocket `height` field to absolute servo positions using the formula `2048 ± 12 ± 8.4 × (height − 32)`, then adds a roll-axis correction from `pid_roll_angle` acting on low-pass-filtered `getAngleX()` data to keep the chassis laterally level.
+
+**SimpleFOC** closes the innermost loop: `motor.loopFOC()` runs the field-oriented current control, and `motor.move()` applies the torque target computed above.
+
+The balance control gain (`pid_speed.P`) is automatically reduced as the robot extends its legs, compensating for the higher moment of inertia at greater ride heights.
+
+## Communication Stack
+
+The ESP32 simultaneously runs two servers in the `web_loop()` call each iteration:
+
+- **`WebServer` on port 80** — serves the embedded HTML/JS page from `basic_web.h` via a single `GET /` route, accessible at `192.168.1.11` in AP mode.
+- **`WebSocketsServer` on port 81** — receives real-time JSON frames from the browser joystick interface.
+
+Each WebSocket frame carries a `mode` field. When `mode` is `"basic"`, `RobotProtocol::parseBasic()` extracts the joystick axes, direction, height, and go-flag from the `StaticJsonDocument<300>` and writes them into the global `Wrobot wrobot` struct. The control loops read from this struct on every iteration, so the latency from browser input to motor response is bounded by one main-loop cycle.
+
+<Steps>
+  <Step title="Browser sends JSON">
+    The user moves the joystick or taps a button in the browser. The JavaScript client encodes the action as a JSON object (e.g., `{"mode":"basic","joyy":50,"joyx":0,"height":38,"go":true}`) and transmits it over WebSocket to port 81.
+  </Step>
+  <Step title="WebSocket receives and parses">
+    The `webSocketEventCallback()` fires on `WStype_TEXT`, deserializes the payload into a `StaticJsonDocument<300>`, checks the `mode` field, and calls `rp.parseBasic(doc)` to decode command fields.
+  </Step>
+  <Step title="Wrobot struct updated">
+    `RobotProtocol::parseBasic()` writes decoded values into the global `wrobot` struct fields: `joyy`, `joyx`, `dir`, `height`, and `go`. `spinOnce()` handles buffer refresh logic to detect stale commands.
+  </Step>
+  <Step title="Control loops compute torque">
+    On the next main-loop iteration, `lqr_balance_loop()` reads `wrobot.joyy` to set the wheel speed target, `yaw_loop()` reads `wrobot.joyx` to accumulate heading demand, and `leg_loop()` reads `wrobot.height` to set servo positions. All loops produce their outputs before `motor.move()` is called.
+  </Step>
+  <Step title="SimpleFOC drives motors and servos move legs">
+    The final torque targets are written to `motor1.target` and `motor2.target` and applied by `motor1.loopFOC()` / `motor1.move()`. Simultaneously, `sms_sts.SyncWritePosEx()` sends updated position commands to both STS3032 servos over Serial2, completing the full sense → compute → actuate cycle.
+  </Step>
+</Steps>

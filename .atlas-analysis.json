@@ -1,0 +1,99 @@
+{
+  "projectType": "general",
+  "projectName": "Micro Wheeled-Leg Robot",
+  "projectDescription": "An open-source, desktop-scale dual-wheeled-leg balancing robot based on ESP32, using SimpleFOC for brushless motor control, LQR for self-balancing, and WebSocket-based WiFi remote control.",
+  "theme": "aspen",
+  "primaryColor": "#1eaee4",
+  "lightColor": "#6dc9ee",
+  "darkColor": "#244ca5",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Introduction",
+            "pages": [
+              "introduction",
+              "overview"
+            ]
+          },
+          {
+            "group": "Build Guide",
+            "pages": [
+              "build/mechanical",
+              "build/electronics",
+              "build/assembly"
+            ]
+          },
+          {
+            "group": "Firmware",
+            "pages": [
+              "firmware/setup",
+              "firmware/configuration",
+              "firmware/flashing"
+            ]
+          },
+          {
+            "group": "Operation",
+            "pages": [
+              "operation/startup",
+              "operation/wifi-control",
+              "operation/tuning"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Software Reference",
+            "pages": [
+              "reference/software-architecture",
+              "reference/control-system",
+              "reference/websocket-protocol",
+              "reference/pid-parameters"
+            ]
+          },
+          {
+            "group": "Hardware Reference",
+            "pages": [
+              "reference/pcb-overview",
+              "reference/bom",
+              "reference/pin-assignments"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Smallest desktop-class two-wheeled-leg balancing robot",
+    "ESP32-based control with WiFi (AP and STA modes)",
+    "SimpleFOC field-oriented control for brushless wheel motors",
+    "LQR self-balancing algorithm with adaptive zero-point calibration",
+    "FEETECH STS3032 bus servos for leg height and jump actuation",
+    "MPU6050 IMU for pitch, roll, and yaw sensing",
+    "AS5600 magnetic encoders on each wheel via I2C",
+    "WebSocket + JSON remote control interface (browser-based, cross-platform)",
+    "Custom PCBs: main controller, encoder, IMU, and servo debug boards",
+    "3D-printable and CNC-machinable mechanical parts with open-source design files"
+  ],
+  "publicApiSurface": [
+    "SMS_STS::SyncWritePosEx(u8 ID[], u8 IDN, s16 Position[], u16 Speed[], u8 ACC[]) — synchronous multi-servo position command",
+    "RobotProtocol::parseBasic(StaticJsonDocument<300> &doc) — parse WebSocket JSON control packet",
+    "RobotProtocol::spinOnce() — process pending control updates",
+    "WiFi_SetAP() — configure ESP32 as a WiFi access point",
+    "set_sta_wifi() — connect ESP32 to an existing WiFi network",
+    "lqr_balance_loop() — LQR self-balancing control loop",
+    "yaw_loop() — yaw-axis rotation control",
+    "leg_loop() / jump_loop() — leg servo actuation and jump sequence",
+    "web_loop() — process WebServer and WebSocket events",
+    "bat_check() — battery voltage ADC sampling and LED indicator",
+    "Commander channels: A=pid_angle, B=pid_gyro, C=pid_distance, D=pid_speed, E=pid_yaw_angle, F=pid_yaw_gyro, G=lpf_joyy, H=pid_lqr_u, I=pid_zeropoint, J=lpf_zeropoint, K=pid_roll_angle, L=lpf_roll",
+    "WebSocket JSON fields: mode, dir (forward/back/left/right/stop/jump), height, roll, linear, angular, stable, joy_x, joy_y",
+    "Wrobot struct: height, roll, linear, angular, dir, dir_last, joyy, joyy_last, joyx, joyx_last, go",
+    "QR_State_t enum: FORWARD, BACK, RIGHT, LEFT, STOP, JUMP"
+  ]
+}

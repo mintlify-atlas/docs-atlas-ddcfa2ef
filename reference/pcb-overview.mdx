@@ -1,0 +1,189 @@
+---
+title: "Custom PCB Overview and Schematic Reference"
+sidebarTitle: "PCB Overview"
+description: "Technical overview of all four custom PCBs in the Micro Wheeled-Leg Robot: Controller, Encoder, IMU, and Servo Debug — with key ICs, connectors, and file locations."
+---
+
+The Micro Wheeled-Leg Robot is built around four custom PCBs, all designed in [LCEDA (EasyEDA Pro)](https://lceda.cn/). Together they handle motor drive, position sensing, inertial measurement, and servo bus communication. Each board ships Gerber files, a component BOM in CSV format, and the original EasyEDA JSON source so you can modify and re-order them freely. The sections below describe each board's role, key components, and connector pinout.
+
+<CardGroup cols={2}>
+  <Card title="Controller PCB" icon="microchip">
+    ESP32-WROOM-32 main MCU paired with two L6234PD013TR 3-phase BLDC motor driver ICs, USB programming via CH340C, and all inter-board connectors.
+  </Card>
+  <Card title="Encoder PCB" icon="rotate">
+    AS5600 12-bit magnetic rotary encoder, one board per motor. Communicates with the Controller over I2C via a GH1.25 4-pin cable.
+  </Card>
+  <Card title="IMU PCB" icon="compass">
+    MPU6050 6-axis inertial sensor (3-axis accelerometer + 3-axis gyroscope) sharing the right-side I2C bus with the right encoder.
+  </Card>
+  <Card title="Servo Debug PCB" icon="arrow-right-arrow-left">
+    Half-duplex UART converter that bridges the ESP32's full-duplex Serial2 to the single-wire TTL bus required by the FEETECH STS3032 leg servos.
+  </Card>
+</CardGroup>
+
+---
+
+## Controller PCB
+
+The Controller PCB (`2.Hardware/1.ControllerPCB/`) is the brain of the robot. It hosts the ESP32 module, both BLDC motor drivers, USB programming circuitry, power regulation, and all connectors to the other boards and peripherals.
+
+### Key ICs
+
+| Reference | Part | Package | Function |
+|-----------|------|---------|----------|
+| U5 | ESP32-WROOM-32 | Module | Main MCU — dual-core 240 MHz, WiFi/BT, 34 usable GPIOs |
+| U1, U4 | L6234PD013TR | POWESO-20 | ST 3-phase brushless motor driver (2 channels) |
+| U7 | CH340C | TSOT-23-8 | USB-to-UART bridge for Arduino/USB programming |
+| U11 | AMS1117-3.3 | SOT-223 | 3.3 V LDO linear regulator |
+| Q1, Q2 | SS8050 | SOT-23 | NPN transistors — motor enable logic |
+| Q3 | SS8550 | SOT-23 | PNP transistor — motor enable logic |
+
+### Passives and Indicators
+
+| Reference | Value / Part | Function |
+|-----------|-------------|----------|
+| L1 | 4.7 µH inductor | Power supply filter |
+| C3, C5 | 100 µF electrolytic (TAJD107M020RNJ) | Bulk decoupling |
+| R7 / R8 | 100 kΩ / 40.2 kΩ | Battery voltage divider → GPIO 35 ADC |
+| LED1 | Red, 0805 | Power indicator |
+| LED2 | Blue, 0805 | Battery level indicator (GPIO 13) |
+| KEY1 | K2-1107ST | EN (reset) button |
+| KEY2 | K2-1107ST | BOOT (flash mode) button |
+
+### Connectors
+
+| Reference | Part Number | Type | Signals |
+|-----------|------------|------|---------|
+| USB2 | Micro-USB B | Programming / debug | USB D+, D− → CH340C |
+| H3 | HX25003-3WAP | 3-pin JST-PH | Battery input + motor phase alternates |
+| J2, J4 | HDR-M-2.54_1x4 | 4-pin 2.54 mm header | I2C / encoder connections |
+| J1, J3 | HDR-M-2.54_1x3 | 3-pin 2.54 mm header | Serial2 / servo and auxiliary signals |
+| CN3, CN5 | A1257WV-S-4P | GH1.25 4-pin | Encoder and IMU GH1.25 cable connections |
+
+### Source Files
+
+| File | Description |
+|------|-------------|
+| `Schematic.pdf` | Human-readable schematic |
+| `Gerber_PCB_Controller.zip` | Fabrication Gerbers |
+| `BOM_PCB_Controller.csv` | Component bill of materials |
+| `SourceFile/PCB_WLRobot.json` | EasyEDA PCB layout source |
+| `SourceFile/SCH_WLRobot.json` | EasyEDA schematic source |
+
+<Note>
+  Counterfeit L6234 motor driver ICs are common on secondary marketplaces. Purchase the L6234PD013TR only from authorised ST Microelectronics distributors (e.g. Mouser, DigiKey, or LCSC). Counterfeit parts may appear to pass basic continuity checks but fail under PWM load, causing erratic motor behaviour or immediate failure.
+</Note>
+
+<Warning>
+  Before connecting the battery, verify the polarity of the XH2.54 battery connector against the board silkscreen. The power silk was corrected in the latest PCB revision; if you are using an older Gerber or a self-sourced battery with a non-standard wiring, confirm pin 1 (positive) and pin 2 (negative) with a multimeter before applying power.
+</Warning>
+
+---
+
+## Encoder PCB
+
+The Encoder PCB (`2.Hardware/2.EncoderPCB/`) carries a single AS5600 12-bit magnetic rotary position sensor. Two identical boards are built — one per wheel motor — and each is mounted so that a diametrically-magnetised disc magnet on the motor shaft rotates within the AS5600's sensing range.
+
+### Key IC
+
+| Part | Interface | Resolution | Address |
+|------|-----------|-----------|---------|
+| AS5600 | I2C (up to 1 MHz) | 12-bit (4096 counts/rev) | 0x36 (fixed) |
+
+### Cable Interface
+
+Each Encoder PCB connects to the Controller via a **GH1.25 4-pin double-ended cable (15 cm)**. The four conductors carry VCC (3.3 V), GND, SDA, and SCL.
+
+### Left vs. Right Assignment
+
+| Board | I2C Bus | ESP32 SDA / SCL GPIOs |
+|-------|---------|-----------------------|
+| Left encoder | I2C 0 (Wire0) | GPIO 19 (SDA) / GPIO 18 (SCL) |
+| Right encoder | I2C 1 (Wire1) | GPIO 23 (SDA) / GPIO 5 (SCL) |
+
+Because the AS5600 has a fixed I2C address (0x36), it is essential that the two encoders are on **separate I2C buses**. Do not connect both encoder boards to the same bus.
+
+### Source Files
+
+| File | Description |
+|------|-------------|
+| `Schematic.pdf` | Schematic |
+| `Gerber_PCB_Encoder.zip` | Fabrication Gerbers |
+| `BOM_PCB_Encoder.csv` | Component BOM |
+| `SourceFile/PCB_Encoder.json` | EasyEDA PCB source |
+| `SourceFile/SCH_Encoder.json` | EasyEDA schematic source |
+
+---
+
+## IMU PCB
+
+The IMU PCB (`2.Hardware/3.IMUPCB/`) hosts an MPU6050 module, providing the robot's tilt and rotation data used by the LQR balancing controller.
+
+### Key Sensor
+
+| Part | Axes | Interface | I2C Address |
+|------|------|-----------|-------------|
+| MPU6050 | 3-axis accelerometer + 3-axis gyroscope | I2C | 0x68 (AD0 = LOW, default) |
+
+### Shared I2C Bus
+
+The IMU PCB shares **I2C bus 1** (GPIO 23 SDA / GPIO 5 SCL) with the right-side Encoder PCB. This works because the AS5600's address (0x36) and the MPU6050's address (0x68) do not conflict. Both devices are initialised together on `I2Ctwo` at 400 kHz.
+
+The IMU connects to the Controller via a GH1.25 4-pin cable (VCC, GND, SDA, SCL) plugged into connector CN5.
+
+### Source Files
+
+| File | Description |
+|------|-------------|
+| `Gerber_PCB_IMU.zip` | Fabrication Gerbers |
+| `BOM_PCB_IMU.csv` | Component BOM |
+| `SourceFile/PCB_IMU_Board.json` | EasyEDA PCB source |
+
+---
+
+## Servo Debug PCB
+
+The Servo Debug PCB (`2.Hardware/4.ServoDebugPCB/`) solves a protocol mismatch between the ESP32's full-duplex UART and the FEETECH STS3032 servo's half-duplex single-wire TTL bus. It uses time-division multiplexing to merge the TX and RX signal paths onto one wire.
+
+### Half-Duplex Conversion
+
+The ESP32's Serial2 port presents separate TX (GPIO 16) and RX (GPIO 17) lines. The STS3032 bus uses a **single bidirectional data line** — the master drives the line to transmit, then releases it to receive the servo's response. The Servo Debug PCB implements a direction-controlled buffer circuit that:
+
+1. **Buffers TX → bus** using the SN74LVC1G125DBV (U2) — a single tri-state buffer, enabled during transmission.
+2. **Gates RX ← bus** using the SN74LVC1G126DBV (U3, U10) — a buffer with enable, active during the receive window.
+3. Switches direction automatically based on the UART idle state, eliminating the need for a separate direction-control GPIO from the ESP32.
+
+### Key ICs
+
+| Reference | Part | Function |
+|-----------|------|----------|
+| U2 | SN74LVC1G125DBV | Tri-state buffer — TX path to servo bus |
+| U3, U10 | SN74LVC1G126DBV | Buffer with enable — RX path from servo bus |
+
+### Source Files
+
+| File | Description |
+|------|-------------|
+| `Schematic.pdf` | Schematic |
+| `SpecialInstruction.png` | Wiring and assembly special instruction (review before building) |
+| `Gerber_PCB_ServoDebug.zip` | Fabrication Gerbers |
+| `BOM_ServoDebug.csv` | Component BOM |
+| `SourceFile/PCB_ServoDebug.json` | EasyEDA PCB source |
+| `SourceFile/SCH_ServoDebug.json` | EasyEDA schematic source |
+
+<Note>
+  Review `SpecialInstruction.png` in the `4.ServoDebugPCB/` folder before assembling or connecting this board. It contains wiring notes specific to the half-duplex direction control that are not fully captured in the schematic alone.
+</Note>
+
+---
+
+## PCB Fabrication
+
+All four boards can be ordered from any standard PCB fabrication service. The following notes apply to all boards:
+
+- **Gerbers** are provided as `.zip` archives, ready to upload directly to a fabricator.
+- **Source files** are EasyEDA JSON format. Open them in [LCEDA (EasyEDA Pro)](https://lceda.cn/) to modify footprints, add copper pours, or re-export Gerbers.
+- **BOMs** are CSV files listing reference designators, values, footprints, and LCSC part numbers where applicable. They can be imported directly into JLCPCB's SMT assembly service.
+- **Recommended fabricators:** [JLCPCB](https://jlcpcb.com/) (pairs well with the LCSC BOM part numbers) or [PCBWay](https://www.pcbway.com/).
+- Standard 2-layer, 1.6 mm FR-4, HASL or ENIG finish is sufficient for all four boards.
+- Order at least **two Encoder PCBs** (one per motor). All other boards require only one unit.

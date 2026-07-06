@@ -1,0 +1,109 @@
+---
+title: "Fabricating Mechanical Parts for the Wheeled-Leg Robot"
+sidebarTitle: "Mechanical Parts"
+description: "How to 3D print, CNC machine, and cut carbon fiber panels for the Micro Wheeled-Leg Robot chassis, legs, and motor mounts."
+---
+
+The Micro Wheeled-Leg Robot chassis is built from three distinct fabrication methods: **3D printing** for the leg linkages and covers, **CNC machining** for the steel body base and aluminum motor mounts, and **panel cutting** for the carbon fiber structural plates. Each method plays a specific structural role — understanding all three before placing any orders will save significant rework. All source geometry lives in `1.RobotModel/Parts-Manufactured/`, and the complete assembly reference is `OriginalRobotModel.stp` at the root of `1.RobotModel/`.
+
+<Tip>
+  Open `OriginalRobotModel.stp` in any free STEP viewer (e.g., FreeCAD, Autodesk Fusion 360 viewer, or CAD Assistant) before ordering materials. Reviewing the full assembly in 3D helps you understand how each part fits together and lets you catch dimension mismatches before fabrication begins.
+</Tip>
+
+## Fabrication Workflow
+
+<Steps>
+  <Step title="Review the full 3D model">
+    Open `1.RobotModel/OriginalRobotModel.stp` in a STEP viewer and familiarise yourself with every part. Cross-reference the BOM at `1.RobotModel/Parts-Purchased/BOM.xlsx` to identify which parts you make and which you buy.
+  </Step>
+
+  <Step title="Order 3D-printed parts">
+    Export the STL files from `1.RobotModel/Parts-Manufactured/1.3DPrint/` and submit them to a nylon powder-sintering (SLS) service bureau, or print them on your own SLS/FDM printer. See the table in the **3D-Printed Parts** section below for the full part list.
+  </Step>
+
+  <Step title="Order CNC-machined parts">
+    Send `BodyBase-Steel.stp` and `MotorBase-Aluminum6061.stp` (both in `1.RobotModel/Parts-Manufactured/2.CNC/`) to a CNC shop together with the threaded-hole drawing `ThreadedHole.pdf`. Specify **steel** for BodyBase and **aluminum 6061** for MotorBase.
+  </Step>
+
+  <Step title="Cut carbon fiber panels">
+    Submit `1.RobotModel/Parts-Manufactured/3.CarbonFiberPanels/Panel.dwg` (or the companion `Panel.pdf`) to a laser-cutting or water-jet service. Request 1.5–2 mm carbon fiber sheet stock.
+  </Step>
+
+  <Step title="Install encoder magnets">
+    Once motors arrive, glue the AS5600 diametrically-magnetized disc magnets to each motor shaft end face using cyanoacrylate (502 glue). See the **Encoder Magnet Installation** section below for critical alignment guidance.
+  </Step>
+
+  <Step title="Press-fit shafts and bearings">
+    Use a flat-jaw vise (not a hammer) to press bearings into the Thigh and Calf printed parts and to seat shafts. Even light misalignment during pressing can crack SLS nylon; go slowly and keep the vise jaws parallel.
+  </Step>
+</Steps>
+
+---
+
+## 3D-Printed Parts
+
+Nylon powder sintering (SLS) is strongly recommended over FDM for all structural leg parts. SLS produces isotropic, nearly fully dense nylon that handles the repeated dynamic loads on the linkages far better than layer-deposited FDM plastic. If SLS is unavailable, use FDM with 60 %+ infill and orient layers perpendicular to the primary bending axis.
+
+All STL files are located in `1.RobotModel/Parts-Manufactured/1.3DPrint/`.
+
+| File name | Qty | Role | Notes |
+|---|---|---|---|
+| `Calf x1.stl` | 1 | Lower leg link (right side) | SLS nylon recommended |
+| `Calf_MIR x1.stl` | 1 | Lower leg link (left side, mirrored) | SLS nylon recommended |
+| `ColumnCover x2.stl` | 2 | Vertical column cosmetic cover | FDM acceptable |
+| `Hub x2.stl` | 2 | Wheel hub, mounts to BLDC rotor | SLS recommended; tight bearing fit |
+| `PCBCover(optional).stl` | 1 | Optional cover over Controller PCB | Print only if desired |
+| `Thigh x1.stl` | 1 | Upper leg link (right side) | SLS nylon recommended |
+| `ThighCover x1.stl` | 1 | Cosmetic cover for right thigh | FDM acceptable |
+| `ThighCover_MIR x1.stl` | 1 | Cosmetic cover for left thigh (mirrored) | FDM acceptable |
+| `Thigh_MIR x1.stl` | 1 | Upper leg link (left side, mirrored) | SLS nylon recommended |
+
+---
+
+## CNC-Machined Parts
+
+Two parts require CNC machining. Both STEP source files are in `1.RobotModel/Parts-Manufactured/2.CNC/`.
+
+### BodyBase — Steel
+
+`BodyBase-Steel.stp` is the central spine of the robot. It must be machined from **steel** to provide the rigidity and mass distribution necessary for the balancing dynamics. All tapped holes must conform to `ThreadedHole.pdf`; provide this drawing explicitly to your machinist so thread depths are correct.
+
+### MotorBase — Aluminum 6061
+
+`MotorBase-Aluminum6061.stp` is the bracket that locates each BLDC motor relative to the body. **Aluminum 6061** is specified for its balance of machinability, strength, and low weight. Again, reference `ThreadedHole.pdf` for all threaded features.
+
+<Note>
+  Shaft and bearing press-fits into the machined MotorBase may require a flat-jaw vise. Apply force slowly and evenly — sudden impacts can distort the bore and create runout that degrades motor performance.
+</Note>
+
+---
+
+## Carbon Fiber Panels
+
+The structural side panels are cut from carbon fiber sheet using the 2D drawings in `1.RobotModel/Parts-Manufactured/3.CarbonFiberPanels/`.
+
+| File | Format | Use |
+|---|---|---|
+| `Panel.dwg` | AutoCAD DWG | Primary drawing for laser/water-jet machine import |
+| `Panel.pdf` | PDF | Human-readable reference and vendor quote |
+
+Laser cutting and water-jet cutting are both suitable. Request **1.5–2 mm carbon fiber sheet**. Wear appropriate PPE when handling raw carbon fiber edges — the cut dust is hazardous.
+
+---
+
+## Encoder Magnet Installation
+
+Each BLDC motor requires one diametrically-magnetized disc magnet bonded to its shaft end face. The AS5600 encoder IC reads the rotating magnetic field above this magnet to determine shaft angle; if the magnet is off-center, the sensor reports a non-uniform field that introduces angle error and degrades FOC control quality.
+
+<Warning>
+  **Critical alignment step.** Bond the encoder magnet to the motor shaft end face using **cyanoacrylate (502 glue)**. The magnet must be **centered** on the shaft face — even 0.5 mm of eccentricity creates a systematic angle error that the FOC algorithm cannot compensate for. Apply a thin, even bead of glue, position the magnet, and hold it firmly in place for 60 seconds before releasing. Do not apply power until the adhesive has fully cured (≥ 5 minutes).
+</Warning>
+
+**Procedure:**
+
+1. Clean the motor shaft end face with isopropyl alcohol and allow it to dry completely.
+2. Apply a small amount of cyanoacrylate (502 glue) to the shaft end face — less is more; excess glue can wick onto the motor windings.
+3. Place the diametrically-magnetized disc magnet flat against the shaft face, visually centering it on the shaft axis.
+4. Hold steady for 60 seconds; do not rotate the magnet during curing.
+5. Allow at least 5 minutes of full cure before handling.
+6. During final assembly, maintain a **0.5–2 mm axial gap** between the magnet surface and the AS5600 sensor face on the Encoder PCB.

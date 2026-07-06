@@ -1,0 +1,295 @@
+---
+title: "LQR Balance and Motion Control System Reference"
+sidebarTitle: "Control System"
+description: "Technical reference for the LQR pitch balance loop, yaw cascade controller, leg roll compensation, jump sequence, and fall detection in the Wheeled-Leg Robot."
+---
+
+The robot uses a decomposed LQR controller for self-balancing, implemented as four cascaded proportional controllers operating on pitch angle, pitch rate, wheel displacement, and wheel speed. A separate cascade controls yaw heading via differential wheel torque. Leg height and roll are managed by the STS3032 servo pair, and a jump state machine uses servo speed bursts to achieve ground-clearance hops.
+
+## LQR Pitch Balance Loop
+
+The balance torque `LQR_u` is derived from the classical LQR formula decomposed into four individually-tunable terms:
+
+```
+LQR_u = k1*(angle - angle_zeropoint)
+      + k2*gyro
+      + k3*(distance - distance_zeropoint)
+      + k4*(speed - 0.1 * lpf_joyy(joyy))
+```
+
+Each gain (`k1`–`k4`) is implemented as the P-term of a `PIDController` instance so that it can be live-tuned via the Commander serial interface without recompiling.
+
+### State Variable Acquisition
+
+```cpp
+LQR_angle    = (float)mpu6050.getAngleY();
+LQR_gyro     = (float)mpu6050.getGyroY();
+LQR_distance = (-0.5f) * (motor1.shaft_angle    + motor2.shaft_angle);
+LQR_speed    = (-0.5f) * (motor1.shaft_velocity + motor2.shaft_velocity);
+```
+
+The −0.5 factor averages both motors and corrects for the physical wiring polarity (positive shaft rotation drives the robot backward).
+
+### Normal Balance Computation
+
+```cpp
+angle_control    = pid_angle(LQR_angle - angle_zeropoint);
+gyro_control     = pid_gyro(LQR_gyro);
+distance_control = pid_distance(LQR_distance - distance_zeropoint);
+speed_control    = pid_speed(LQR_speed - 0.1 * lpf_joyy(wrobot.joyy));
+
+LQR_u = angle_control + gyro_control + distance_control + speed_control;
+```
+
+The joystick Y term (`0.1 * lpf_joyy(wrobot.joyy)`) introduces a forward/back velocity bias by shifting the speed setpoint, which causes the balance loop to naturally tilt the robot in the commanded direction.
+
+### Wheel Liftoff Detection
+
+If the wheel angular velocity spikes — indicating the wheels have left the ground (during a jump or forceful push) — the distance and speed terms are suppressed to prevent integrator wind-up and runaway torque:
+
+```cpp
+robot_speed_last = robot_speed;
+robot_speed      = LQR_speed;
+
+if (abs(robot_speed - robot_speed_last) > 10 ||
+    abs(robot_speed) > 50               ||
+    (jump_flag != 0))
+{
+    distance_zeropoint  = LQR_distance; // reset displacement zero-point
+    LQR_u               = angle_control + gyro_control; // angle+gyro only
+    pid_lqr_u.error_prev = 0;           // clear integrator
+}
+else
+{
+    LQR_u = angle_control + gyro_control + distance_control + speed_control;
+}
+```
+
+### Distance Zero-Point Reset Logic
+
+Three situations trigger a forced reset of `distance_zeropoint` to prevent the displacement term from fighting intentional motion:
+
+| Trigger | Condition |
+|---|---|
+| Joystick active | `wrobot.joyy != 0` |
+| Joystick just zeroed and robot nearly stopped | `wrobot_move_stop_flag == 1` and `abs(LQR_speed) < 0.5` |
+| Robot pushed quickly | `abs(LQR_speed) > 15` |
+
+### Small-Torque Dead-Band Compensation
+
+At very small output values the motor produces no meaningful torque due to stiction and back-EMF non-linearity. When all of the following are true, `pid_lqr_u` (a PI controller) integrates away the residual error:
+
+```cpp
+if (abs(LQR_u) < 5 && wrobot.joyy == 0 &&
+    abs(distance_control) < 4 && (jump_flag == 0))
+{
+    LQR_u = pid_lqr_u(LQR_u);  // integrating dead-band compensation
+    angle_zeropoint -= pid_zeropoint(lpf_zeropoint(distance_control));
+}
+else
+{
+    pid_lqr_u.error_prev = 0;  // clear integrator outside dead-band
+}
+```
+
+### Adaptive Zero-Point Self-Calibration
+
+`angle_zeropoint` drifts slowly toward the true centre of mass by integrating the filtered `distance_control` signal. A persistent non-zero displacement indicates the nominal `angle_zeropoint` is offset from the real balance point:
+
+```
+angle_zeropoint -= pid_zeropoint( lpf_zeropoint(distance_control) )
+```
+
+Default `angle_zeropoint = -2.25` degrees. The adaptation rate is governed by `pid_zeropoint.P = 0.002`.
+
+### Adaptive pid_speed Gain
+
+The effective leg length changes significantly with `wrobot.height`. A shorter stance makes the inverted-pendulum dynamics faster; the speed gain is reduced at higher leg positions to prevent oscillation:
+
+```cpp
+if      (wrobot.height < 50) pid_speed.P = 0.7;
+else if (wrobot.height < 64) pid_speed.P = 0.6;
+else                         pid_speed.P = 0.5;
+```
+
+---
+
+## Yaw Control Loop
+
+Yaw heading is controlled by accumulating the IMU's incremental yaw angle and adding the joystick X contribution, then applying a differential torque correction.
+
+### Yaw Angle Accumulation
+
+The MPU6050 reports yaw angle modulo ±π. `yaw_angle_addup()` unwraps the modular angle into a monotonic running total:
+
+```cpp
+void yaw_angle_addup() {
+    YAW_angle = (float)mpu6050.getAngleZ();
+    YAW_gyro  = (float)mpu6050.getGyroZ();
+
+    float yaw_angle_1, yaw_angle_2, yaw_addup_angle;
+    if (YAW_angle > YAW_angle_last) {
+        yaw_angle_1 = YAW_angle - YAW_angle_last;
+        yaw_angle_2 = YAW_angle - YAW_angle_last - 2*PI;
+    } else {
+        yaw_angle_1 = YAW_angle - YAW_angle_last;
+        yaw_angle_2 = YAW_angle - YAW_angle_last + 2*PI;
+    }
+    // take the smaller-magnitude candidate to detect wrap-around
+    yaw_addup_angle = (abs(yaw_angle_1) > abs(yaw_angle_2))
+                      ? yaw_angle_2 : yaw_angle_1;
+
+    YAW_angle_total += yaw_addup_angle;
+    YAW_angle_last   = YAW_angle;
+}
+```
+
+### Joystick Yaw Input Integration
+
+After accumulation, the joystick X axis rotates the heading setpoint:
+
+```cpp
+YAW_angle_total += wrobot.joyx * 0.002;
+```
+
+Positive `wrobot.joyx` turns the robot right.
+
+### Yaw PID and Differential Torque
+
+```cpp
+float yaw_angle_control = pid_yaw_angle(YAW_angle_total);
+float yaw_gyro_control  = pid_yaw_gyro(YAW_gyro);
+YAW_output = yaw_angle_control + yaw_gyro_control;
+```
+
+`YAW_output` is then injected differentially into the wheel targets:
+
+```cpp
+motor1.target = (-0.5) * (LQR_u + YAW_output);
+motor2.target = (-0.5) * (LQR_u - YAW_output);
+```
+
+Adding `YAW_output` to motor 1 and subtracting it from motor 2 spins the robot in place while the balance loop maintains pitch stability.
+
+---
+
+## Leg Height and Roll Control
+
+Both legs are driven by FEETECH STS3032 bus servos. The servo position formula maps the abstract `wrobot.height` parameter (range 32–80) to raw encoder counts around the mechanical centre (2048 counts).
+
+### Servo Position Formula
+
+```cpp
+// Roll compensation accumulates via low-pass + PID:
+float roll_angle   = (float)mpu6050.getAngleX() + 2.0f;
+leg_position_add   = pid_roll_angle(lpf_roll(roll_angle));
+
+// Symmetric position about mechanical centre (2048):
+Position[0] = 2048 + 12 + 8.4 * (wrobot.height - 32) - leg_position_add;
+Position[1] = 2048 - 12 - 8.4 * (wrobot.height - 32) - leg_position_add;
+```
+
+The constant `+12` / `−12` offset corrects for the mechanical asymmetry between the two servo arms. The factor `8.4` counts/unit converts the height parameter to servo encoder counts.
+
+### Output Clamping
+
+Positions are hard-clamped to keep the servos within their effective travel range:
+
+| Servo | Min | Max |
+|---|---|---|
+| `Position[0]` (ID 1) | 2110 | 2510 |
+| `Position[1]` (ID 2) | 1586 | 1986 |
+
+### Normal Operation Speed / Acceleration
+
+```cpp
+ACC[0]   = 8;   ACC[1]   = 8;
+Speed[0] = 200; Speed[1] = 200;
+```
+
+These are conservative values that give smooth leg movement without destabilising the balance loop.
+
+---
+
+## Jump Sequence
+
+The jump is triggered by detecting the direction transition from `JUMP (5)` → `STOP (4)` while `jump_flag == 0`. The sequence is managed by a counter (`jump_flag`) that increments each loop iteration.
+
+<Steps>
+  <Step title="Idle — Ready to Jump">
+    `jump_flag == 0` and servos follow normal `leg_loop()` height commands.
+  </Step>
+  <Step title="Trigger — Detect JUMP→STOP Transition">
+    When `wrobot.dir_last == 5` (JUMP) and `wrobot.dir == 4` (STOP), the servos are commanded to maximum extension at maximum speed (ACC = 0, Speed = 0 means servo uses its own maximum):
+
+    ```cpp
+    ACC[0] = 0;  ACC[1] = 0;
+    Speed[0] = 0; Speed[1] = 0;
+    Position[0] = 2048 + 12 + 8.4 * (80 - 32);  // height = 80 (full extend)
+    Position[1] = 2048 - 12 - 8.4 * (80 - 32);
+    sms_sts.SyncWritePosEx(ID, 2, Position, Speed, ACC);
+    jump_flag = 1;
+    ```
+  </Step>
+  <Step title="Extend Phase (jump_flag 1–29)">
+    `jump_flag` increments each loop. The servos hold their extended position. The LQR liftoff detection suppresses wheel distance/speed terms during this phase.
+  </Step>
+  <Step title="Retract Phase (jump_flag 30–34)">
+    Servos are commanded back to mid-height (height = 40 equivalent) at maximum speed, then `jump_flag` is forced to 40 to skip over the re-trigger window:
+
+    ```cpp
+    if ((jump_flag > 30) && (jump_flag < 35)) {
+        Position[0] = 2048 + 12 + 8.4 * (40 - 32);
+        Position[1] = 2048 - 12 - 8.4 * (40 - 32);
+        sms_sts.SyncWritePosEx(ID, 2, Position, Speed, ACC);
+        jump_flag = 40;
+    }
+    ```
+  </Step>
+  <Step title="Recovery Phase (jump_flag 40–200)">
+    `jump_flag` continues incrementing. LQR liftoff suppression remains active (`jump_flag != 0`). Normal `leg_loop()` height control is suspended; the robot recovers balance.
+  </Step>
+  <Step title="Ready (jump_flag > 200 → reset to 0)">
+    `jump_flag` resets to 0, restoring normal servo and LQR operation. The robot is ready to jump again.
+  </Step>
+</Steps>
+
+---
+
+## Fall Detection and Recovery
+
+The firmware detects a fallen state by monitoring the IMU pitch angle and implements a timed recovery to prevent the motors from fighting against a fallen robot.
+
+```cpp
+// Fall detection — set uncontrolable flag
+if (abs(LQR_angle) > 25.0f) {
+    uncontrolable = 1;
+}
+
+// Recovery — count consecutive cycles with small angle
+if (uncontrolable != 0) {
+    if (abs(LQR_angle) < 10.0f) {
+        uncontrolable++;
+    }
+    if (uncontrolable > 200) {
+        uncontrolable = 0;  // resume control
+    }
+}
+
+// Zero motor output while fallen
+if (wrobot.go == 0 || uncontrolable != 0) {
+    motor1.target = 0;
+    motor2.target = 0;
+    leg_position_add = 0;
+}
+```
+
+| Threshold | Value | Description |
+|---|---|---|
+| Fall trigger | \|LQR\_angle\| > 25° | Robot is declared fallen; motors are zeroed |
+| Recovery condition | \|LQR\_angle\| < 10° | Must hold for 200 consecutive loop cycles |
+| Recovery delay | 200 loop cycles | ~200 ms at typical loop rates before control resumes |
+
+<Note>
+The recovery counter only increments when the angle is already below 10°. If the robot is picked up and held at an intermediate angle (10°–25°), the counter does not advance — the robot will not re-enable until it is placed upright.
+</Note>

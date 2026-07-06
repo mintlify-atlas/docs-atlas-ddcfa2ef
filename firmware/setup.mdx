@@ -1,0 +1,76 @@
+---
+title: "Set Up Arduino IDE for the Wheeled-Leg Robot Firmware"
+sidebarTitle: "Dev Environment"
+description: "Install Arduino IDE, add the ESP32 board package at version 2.0.3, and import all required libraries to build the Micro Wheeled-Leg Robot firmware."
+---
+
+The Micro Wheeled-Leg Robot firmware is written in Arduino/C++ and runs on an ESP32 microcontroller. Before you can compile and flash the firmware, you need to install the Arduino IDE, add ESP32 board support at the specific version **2.0.3**, and install several bundled libraries. Version 2.0.3 of the ESP32 Arduino core is the recommended release for this project — newer board package versions may introduce breaking API changes or incompatibilities with the bundled WebSockets library, so it is important to install exactly this version rather than the latest available.
+
+<Warning>
+  The **WebSockets** library included in `3.Software/libraries/WebSockets.zip` **must** be installed from that bundled ZIP file. Do **not** install the WebSockets library from the Arduino Library Manager — other versions are incompatible with the ESP32 2.0.3 board package and the firmware's WebSocket server implementation, and the sketch will fail to compile or behave incorrectly at runtime.
+</Warning>
+
+<Steps>
+  <Step title="Download and install Arduino IDE">
+    Go to [https://www.arduino.cc/](https://www.arduino.cc/) and download the latest Arduino IDE for your operating system (Windows, macOS, or Linux). Run the installer and follow the on-screen instructions. Launch the IDE once the installation completes.
+  </Step>
+
+  <Step title="Add the ESP32 board package at version 2.0.3">
+    1. Open **File → Preferences** (macOS: **Arduino IDE → Preferences**).
+    2. In the **Additional Boards Manager URLs** field, paste the following URL:
+
+    ```
+    https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+    ```
+
+    3. Click **OK** to save.
+    4. Open **Tools → Board → Boards Manager**.
+    5. Search for `esp32` in the search box.
+    6. Find the **esp32 by Espressif Systems** entry, open the version dropdown, select **2.0.3**, and click **Install**.
+
+    Wait for the installation to complete before proceeding.
+  </Step>
+
+  <Step title="Install bundled libraries from ZIP files">
+    The project ships all required libraries as ZIP archives inside `3.Software/libraries/`. Install them one at a time using **Sketch → Include Library → Add .ZIP Library…**, selecting each file in the following order:
+
+    1. `ArduinoJson.zip` — JSON serialisation/deserialisation for WebSocket control messages
+    2. `MPU6050_tockn.zip` — MPU6050 IMU driver used to read pitch, roll, and gyro data
+    3. `Simple_FOC.zip` — SimpleFOC BLDC motor control for the two wheel motors
+    4. `WebSockets.zip` — WebSocket server running on port 81 (**must use this bundled version**)
+
+    After adding each ZIP, Arduino IDE will confirm the library was installed successfully. Repeat for all four archives.
+
+    <Note>
+      **ArduinoJson**, **MPU6050\_tockn**, and **SimpleFOC** are standard libraries available through the official Arduino Library Manager. If you have already installed compatible versions of those three from the Library Manager, you may skip adding their ZIPs. However, always use the bundled `WebSockets.zip` — never substitute the Library Manager version for that one.
+    </Note>
+  </Step>
+
+  <Step title="Open the firmware sketch">
+    In Arduino IDE, go to **File → Open** and navigate to the firmware folder:
+
+    ```
+    3.Software/wl_pro_robot/wl_pro_robot.ino
+    ```
+
+    Arduino IDE will open the sketch along with all associated tabs (`robot.h`, `wifi.cpp`, `wifi.h`, `Servo_STS3032.h`, etc.).
+  </Step>
+
+  <Step title="Select the correct board">
+    Go to **Tools → Board → ESP32 Arduino** and select **ESP32 Dev Module** (also listed as **ESP32-WROOM-32** depending on your board package version). The Controller PCB is based on an ESP32-WROOM-32 module.
+  </Step>
+
+  <Step title="Configure upload settings">
+    Under the **Tools** menu, verify or set the following options:
+
+    | Setting | Value |
+    |---|---|
+    | Upload Speed | `921600` |
+    | Flash Frequency | `80MHz` |
+    | Partition Scheme | `Default 4MB with spiffs` (or any scheme that provides sufficient flash) |
+
+    Leave all other settings at their defaults for the ESP32 Dev Module.
+  </Step>
+</Steps>
+
+With the IDE configured and all libraries installed, your environment is ready to compile and flash the firmware. Proceed to [Configuration](/firmware/configuration) to set your WiFi credentials and balance parameters before uploading.

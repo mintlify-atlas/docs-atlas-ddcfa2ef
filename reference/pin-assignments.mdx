@@ -1,0 +1,109 @@
+---
+title: "ESP32 GPIO Pin Assignments and Interface Reference"
+sidebarTitle: "Pin Assignments"
+description: "Full GPIO pinout for the Micro Wheeled-Leg Robot Controller PCB: motor PWM, I2C buses, UART ports, ADC, and LED assignments."
+---
+
+The Controller PCB is built around the **ESP32-WROOM-32** module (U5) — a dual-core 240 MHz Xtensa LX6 SoC with integrated WiFi and Bluetooth. Of its available GPIOs, eighteen are committed to fixed hardware functions: six PWM channels and two enable lines for the BLDC motor drivers, four I2C lines across two independent buses, four UART lines across two serial ports, one ADC input for battery monitoring, and one digital output for the battery LED. The tables below document every assigned pin, cross-referenced to the firmware source (`wl_pro_robot.ino`).
+
+---
+
+## Motor Driver Pins
+
+Both BLDC motors are driven by the SimpleFOC `BLDCDriver3PWM` class. Each driver requires three PWM phase outputs and one active-high enable line, wired to the L6234PD013TR on the Controller PCB.
+
+| GPIO | Signal | Motor | Notes |
+|------|--------|-------|-------|
+| 32 | Phase A PWM | Motor 1 (left wheel) | L6234 IN1 |
+| 33 | Phase B PWM | Motor 1 (left wheel) | L6234 IN2 |
+| 25 | Phase C PWM | Motor 1 (left wheel) | L6234 IN3 |
+| 22 | Enable | Motor 1 (left wheel) | L6234 EN — active high |
+| 26 | Phase A PWM | Motor 2 (right wheel) | L6234 IN1 |
+| 27 | Phase B PWM | Motor 2 (right wheel) | L6234 IN2 |
+| 14 | Phase C PWM | Motor 2 (right wheel) | L6234 IN3 |
+| 12 | Enable | Motor 2 (right wheel) | L6234 EN — active high |
+
+<Note>
+  GPIO 12 is a **strapping pin** on the ESP32. If it is pulled HIGH at power-on, the ESP32 will configure its flash voltage to 1.8 V, which prevents correct booting on most modules. Because the L6234 enable signal is driven HIGH only after `driver2.init()` is called in `setup()`, GPIO 12 is naturally LOW during the boot strapping window — no external pull-down is required. Be aware of this constraint if you modify the enable logic or add external circuitry to GPIO 12.
+</Note>
+
+---
+
+## I2C Bus Pins
+
+Two independent I2C buses are used to avoid address conflicts: both AS5600 encoder ICs share the fixed address 0x36 and therefore must each be on a separate bus. The MPU6050 (address 0x68) shares bus 1 with the right encoder without conflict.
+
+| GPIO | Signal | Bus | Speed | Devices |
+|------|--------|-----|-------|---------|
+| 19 | SDA | I2C 0 (`Wire0`) | 400 kHz | Left AS5600 encoder (0x36) |
+| 18 | SCL | I2C 0 (`Wire0`) | 400 kHz | Left AS5600 encoder (0x36) |
+| 23 | SDA | I2C 1 (`Wire1`) | 400 kHz | Right AS5600 encoder (0x36) + MPU6050 (0x68) |
+| 5 | SCL | I2C 1 (`Wire1`) | 400 kHz | Right AS5600 encoder (0x36) + MPU6050 (0x68) |
+
+<Tip>
+  If an AS5600 is not detected at startup (SimpleFOC will report an initialisation error on Serial), first confirm which encoder is connected to which bus — swapping the GH1.25 cables is a common assembly mistake. Also check that the diametrically-magnetised disc magnet is centred over the AS5600 IC and the air gap is within the **0.5–2 mm** range specified in the AS5600 datasheet. Gaps outside this range result in weak or no magnetic field signal and a failed sensor reading.
+</Tip>
+
+---
+
+## UART / Serial Pins
+
+Two UART ports are used: UART0 for USB debug output and the SimpleFOC Commander interface, and UART2 for the FEETECH STS3032 servo bus through the Servo Debug PCB.
+
+| GPIO | Signal | Port | Baud Rate | Purpose |
+|------|--------|------|-----------|---------|
+| 1 | TX | Serial (UART0) | 115,200 | USB debug output + SimpleFOC Commander |
+| 3 | RX | Serial (UART0) | 115,200 | USB debug input + SimpleFOC Commander |
+| 16 | TX | Serial2 (UART2) | 1,000,000 | STS3032 servo bus TX → Servo Debug PCB |
+| 17 | RX | Serial2 (UART2) | 1,000,000 | STS3032 servo bus RX ← Servo Debug PCB |
+
+The SimpleFOC Commander is mapped to `Serial` (UART0) and exposes PID and LPF tuning parameters over the USB serial connection at 115,200 baud. Serial2 operates at 1 Mbit/s to meet the STS3032's bus timing requirements; this baud rate is set by `Serial2.begin(1000000)` in `setup()`.
+
+---
+
+## ADC and GPIO
+
+| GPIO | Function | Direction | Details |
+|------|----------|-----------|---------|
+| 35 | Battery voltage ADC | Input (analog) | ADC1\_CH7, 12-bit resolution, 11 dB attenuation; voltage divider R7 = 100 kΩ / R8 = 40.2 kΩ; multiply calibrated millivolt reading by 3.97 to obtain battery voltage |
+| 13 | Battery LED — blue (LED2) | Output (digital) | HIGH = battery voltage > 7.8 V; LOW = below threshold, charge required |
+
+---
+
+## Battery Voltage Calculation
+
+The battery voltage is sampled every 1000 firmware loop iterations via `bat_check()`. The ESP32 ADC calibration API (`esp_adc_cal`) is used to compensate for non-linearity before the divider ratio is applied.
+
+```cpp
+// From wl_pro_robot.ino bat_check()
+uint32_t raw = analogRead(BAT_PIN);  // BAT_PIN = 35
+uint32_t voltage_mV = esp_adc_cal_raw_to_voltage(raw, &adc_chars);
+double battery_V = (voltage_mV * 3.97) / 1000.0;
+// LED on GPIO 13 lights if battery_V > 7.8 V
+if (battery_V > 7.8)
+    digitalWrite(LED_BAT, HIGH);
+else
+    digitalWrite(LED_BAT, LOW);
+```
+
+The multiplier 3.97 is derived from the voltage divider: `(R7 + R8) / R8 = (100000 + 40200) / 40200 ≈ 3.49`, scaled against the ADC's 3.3 V full-scale reference. Use the calibrated `esp_adc_cal_raw_to_voltage()` output rather than the raw 12-bit value for best accuracy across temperature and supply variation.
+
+---
+
+## I2C Initialization
+
+Both I2C buses and both encoder sensors are initialised in `setup()` before the SimpleFOC motor initialisation sequence begins. The MPU6050 is also initialised on `I2Ctwo` with a gyroscope offset calibration pass.
+
+```cpp
+// I2C bus 0: left encoder
+I2Cone.begin(19, 18, 400000UL);
+sensor1.init(&I2Cone);
+
+// I2C bus 1: right encoder + IMU
+I2Ctwo.begin(23, 5, 400000UL);
+sensor2.init(&I2Ctwo);
+mpu6050.begin();           // MPU6050 uses I2Ctwo (Wire1)
+mpu6050.calcGyroOffsets(true); // Calibrate gyro at startup — keep robot still
+```
+
+Keep the robot stationary on a flat surface during the `calcGyroOffsets(true)` call; it samples the gyroscope for several seconds to compute bias offsets. Motion during this window will produce incorrect offsets and degrade balancing performance.

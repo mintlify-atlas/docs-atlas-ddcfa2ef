@@ -1,0 +1,175 @@
+---
+title: "WebSocket JSON Control Protocol Reference"
+sidebarTitle: "WebSocket Protocol"
+description: "Reference for the WebSocket JSON protocol used by the browser interface to control the Micro Wheeled-Leg Robot: message format, field types, and direction encoding."
+---
+
+The robot exposes a WebSocket server on port 81 alongside its HTTP server on port 80. The browser-based control interface (served from `/`) opens a persistent WebSocket connection and sends UTF-8 JSON text frames to command the robot. Every incoming frame is deserialised into a `StaticJsonDocument<300>` and, if the `mode` field equals `"basic"`, handed to `RobotProtocol::parseBasic()` which updates the global `Wrobot` struct and the internal 20-byte command buffer.
+
+## Connection Details
+
+<CardGroup cols={2}>
+  <Card title="HTTP (Web UI)" icon="globe">
+    `http://192.168.1.11/`
+
+    Connect your device to the **WLROBOT** WiFi access point (password: `12345678`). The ESP32 acts as the AP and always has IP `192.168.1.11`.
+  </Card>
+  <Card title="WebSocket (Control)" icon="bolt">
+    `ws://192.168.1.11:81`
+
+    Text frames only. JSON payload, max document size 300 bytes (`StaticJsonDocument<300>`).
+  </Card>
+</CardGroup>
+
+<Note>
+The robot defaults to **AP mode** (`WiFi_SetAP()`). A STA mode helper (`set_sta_wifi()`) is provided in `wifi.cpp` but is commented out in `setup()`. To use STA mode, uncomment that call and set the target SSID/password in `wifi.cpp`.
+</Note>
+
+## Request Message Format
+
+Every control message must include `"mode": "basic"`. Messages with any other `mode` value — or missing the field entirely — are silently ignored by the firmware.
+
+<ParamField body="mode" type="string" required>
+  Must be `"basic"`. This selects the `parseBasic()` handler. Any other value causes the frame to be discarded.
+</ParamField>
+
+<ParamField body="dir" type="string">
+  Direction command. Accepted values: `"forward"`, `"back"`, `"left"`, `"right"`, `"stop"`, `"jump"`. Unmapped strings default to `"stop"`. See [Direction Enum](#direction-enum) below for the internal `QR_State_t` mapping.
+</ParamField>
+
+<ParamField body="height" type="integer">
+  Leg height setpoint in the range **32–80**, default **38**. Maps linearly to STS3032 servo positions via the formula `2048 ± 12 ± 8.4*(height−32)`. Higher values extend the legs further, raising the chassis.
+</ParamField>
+
+<ParamField body="roll" type="integer">
+  Roll compensation offset from the UI. Stored in `wrobot.roll`. Not currently used directly by the balance loop (roll compensation is derived from `mpu6050.getAngleX()` instead), but the value is transmitted in the binary protocol buffer for potential downstream use.
+</ParamField>
+
+<ParamField body="linear" type="integer">
+  Linear speed bias from the UI. Stored in `wrobot.linear`. Reserved for future motion blending; the active forward/back drive is controlled via `joy_y`.
+</ParamField>
+
+<ParamField body="angular" type="integer">
+  Angular speed bias from the UI. Stored in `wrobot.angular`. Reserved for future use; active yaw is controlled via `joy_x`.
+</ParamField>
+
+<ParamField body="stable" type="integer">
+  Balance enable flag. `1` = balancing active (`wrobot.go = true`). `0` = motors zeroed (`wrobot.go = false`). Corresponds to the **"Robot go!"** button in the web UI. The robot will not attempt to balance until this is set to `1`.
+</ParamField>
+
+<ParamField body="joy_x" type="integer">
+  Joystick X axis — yaw input. Positive values turn right, negative values turn left. Each loop iteration adds `wrobot.joyx * 0.002` to the accumulated yaw setpoint `YAW_angle_total`. Typical range: −100 to +100.
+</ParamField>
+
+<ParamField body="joy_y" type="integer">
+  Joystick Y axis — forward/back speed bias. Positive = forward. Injected into the LQR speed term as `0.1 * lpf_joyy(wrobot.joyy)`. Typical range: −100 to +100.
+</ParamField>
+
+## Direction Enum
+
+The `"dir"` string in the JSON is mapped to the `QR_State_t` enum in `robot.h` and stored in `wrobot.dir` and `_now_buf[3]`.
+
+| JSON `dir` string | `QR_State_t` name | Integer value | `wrobot.dir` |
+|---|---|---|---|
+| `"forward"` | `FORWARD` | 0 | 0 |
+| `"back"` | `BACK` | 1 | 1 |
+| `"right"` | `RIGHT` | 2 | 2 |
+| `"left"` | `LEFT` | 3 | 3 |
+| `"stop"` | `STOP` | 4 | 4 |
+| `"jump"` | `JUMP` | 5 | 5 |
+
+<Note>
+The jump sequence is edge-triggered: the firmware watches for the transition `wrobot.dir_last == JUMP (5)` → `wrobot.dir == STOP (4)`. To trigger a jump you must send a `"jump"` frame followed by a `"stop"` frame. Holding `"jump"` without releasing to `"stop"` will not trigger the jump.
+</Note>
+
+## Internal Buffer Layout
+
+`parseBasic()` writes the decoded values into the 20-byte `_now_buf` array inside the `RobotProtocol` instance. Signed integer fields are stored as a sign byte followed by the absolute value to avoid negative bytes in the raw buffer.
+
+| Byte index | Content | Description |
+|---|---|---|
+| 0 | `0xAA` | Header byte 1 (set once in constructor, never overwritten) |
+| 1 | `0x55` | Header byte 2 (set once in constructor, never overwritten) |
+| 2 | `BASIC` (0) | Mode identifier — always 0 for basic mode |
+| 3 | `QR_State_t` | Direction value (0–5) |
+| 4 | `height` | Leg height (32–80) |
+| 5 | `roll_sign` | `0` = positive or zero, `1` = negative |
+| 6 | `abs(roll)` | Absolute magnitude of roll |
+| 7 | `linear_sign` | `0` = positive or zero, `1` = negative |
+| 8 | `abs(linear)` | Absolute magnitude of linear |
+| 9 | `angular_sign` | `0` = positive or zero, `1` = negative |
+| 10 | `abs(angular)` | Absolute magnitude of angular |
+| 11 | `stable` | `0` or `1` (maps to `wrobot.go`) |
+| 12 | `joyx_sign` | `0` = positive or zero, `1` = negative |
+| 13 | `abs(joy_x)` | Absolute magnitude of joystick X |
+| 14 | `joyy_sign` | `0` = positive or zero, `1` = negative |
+| 15 | `abs(joy_y)` | Absolute magnitude of joystick Y |
+| 16–19 | — | Unused (buffer allocated as 20 bytes) |
+
+`checkBufRefresh()` compares `_now_buf` with `_old_buf` byte-by-byte. If any byte differs, it copies `_now_buf` into `_old_buf` and signals a refresh. `spinOnce()` calls this every iteration, enabling optional UART re-transmission of the binary protocol.
+
+## Example Messages
+
+**Stand up (enable balancing at default height):**
+
+```json
+{
+  "mode":   "basic",
+  "dir":    "stop",
+  "height": 38,
+  "stable": 1,
+  "joy_x":  0,
+  "joy_y":  0
+}
+```
+
+**Drive forward at moderate speed:**
+
+```json
+{
+  "mode":   "basic",
+  "dir":    "forward",
+  "height": 38,
+  "stable": 1,
+  "joy_x":  0,
+  "joy_y":  80
+}
+```
+
+**Trigger a jump (send JUMP then immediately STOP):**
+
+```json
+{ "mode": "basic", "dir": "jump", "height": 38, "stable": 1, "joy_x": 0, "joy_y": 0 }
+```
+
+```json
+{ "mode": "basic", "dir": "stop", "height": 38, "stable": 1, "joy_x": 0, "joy_y": 0 }
+```
+
+The firmware detects the `dir_last == JUMP` → `dir == STOP` edge and begins the jump sequence. The two messages must be sent in separate frames; combining them in one frame has no effect.
+
+**Raise legs to tall stance:**
+
+```json
+{
+  "mode":   "basic",
+  "dir":    "stop",
+  "height": 70,
+  "stable": 1,
+  "joy_x":  0,
+  "joy_y":  0
+}
+```
+
+**Emergency stop (disable balance):**
+
+```json
+{
+  "mode":   "basic",
+  "dir":    "stop",
+  "height": 38,
+  "stable": 0,
+  "joy_x":  0,
+  "joy_y":  0
+}
+```

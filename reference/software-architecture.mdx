@@ -1,0 +1,106 @@
+---
+title: "Software Architecture and Firmware Module Reference"
+sidebarTitle: "Architecture"
+description: "Complete reference for the Micro Wheeled-Leg Robot firmware: source files, class hierarchy, main loop execution order, and library dependencies."
+---
+
+The Micro Wheeled-Leg Robot firmware is a single Arduino sketch targeting the ESP32 microcontroller. All control logic — motor FOC, IMU balancing, servo actuation, and WebSocket communication — runs on one core in a tight bare-metal loop. The codebase is split across seven source files and one generated web-interface header, each with a clearly bounded responsibility.
+
+## Source Files
+
+| File | Purpose |
+|---|---|
+| `wl_pro_robot.ino` | Main Arduino sketch: `setup()`, `loop()`, and all control functions (`lqr_balance_loop`, `yaw_loop`, `leg_loop`, `jump_loop`, `yaw_angle_addup`, `bat_check`, `web_loop`) |
+| `robot.h` | `Wrobot` struct, `QR_State_t` enum, `Robot_Mode_t` enum, and `RobotProtocol` class declaration |
+| `robot.cpp` | `RobotProtocol` implementation: `spinOnce()`, `parseBasic()`, `checkBufRefresh()`, `UART_WriteBuf()` |
+| `wifi.h` | `WiFi_SetAP()` and `set_sta_wifi()` declarations |
+| `wifi.cpp` | WiFi AP/STA configuration, SSID/password constants, and static IP assignment (`192.168.1.11`) |
+| `Servo_STS3032.h` | `SCS`, `SCSerial`, and `SMS_STS` class declarations; half-duplex serial type definitions |
+| `Servo_STS3032.cpp` | FEETECH STS3032 half-duplex serial protocol: `syncWrite()`, `SyncWritePosEx()`, hardware UART wrappers |
+| `basic_web.h` | Embedded HTML/JS web control interface stored as a string constant (`basic_web`); served by the HTTP handler |
+
+## Library Dependencies
+
+| Library | Version | Purpose |
+|---|---|---|
+| SimpleFOC | bundled | BLDC motor Field-Oriented Control — `BLDCMotor`, `BLDCDriver3PWM`, `MagneticSensorI2C`, `PIDController`, `LowPassFilter`, `Commander` |
+| MPU6050_tockn | bundled | MPU6050 IMU driver — `getAngleY()`, `getGyroY()`, `getAngleX()`, `getAngleZ()`, `getGyroZ()` |
+| WebSockets | bundled **(use the bundled version)** | WebSocket server on port 81 — `WebSocketsServer` |
+| ArduinoJson | bundled | JSON deserialisation — `StaticJsonDocument<300>` |
+| WebServer | Arduino-ESP32 built-in | HTTP server on port 80 |
+| WiFi | Arduino-ESP32 built-in | WiFi AP/STA management |
+
+<Warning>
+The `WebSockets` library is vendored inside the project. Do not replace it with a newer version from the Library Manager — the `WebSocketsServer` API surface may differ and break the event callback signature.
+</Warning>
+
+## Main Loop Execution Order
+
+Every iteration of `loop()` executes the following steps in strict order. No RTOS tasks are used; all processing is synchronous.
+
+<Steps>
+  <Step title="bat_check() — Battery Voltage ADC">
+    Reads ADC channel 7 (GPIO 35) every 1 000 loop iterations using the ESP-IDF calibrated ADC API (`esp_adc_cal_raw_to_voltage`). Scales the raw millivolt reading by 3.97 to recover battery voltage. Turns the status LED (GPIO 13) on when voltage > 7.8 V.
+  </Step>
+  <Step title="web_loop() — Network I/O">
+    Calls `webserver.handleClient()` to service any pending HTTP requests, `websocket.loop()` to dispatch incoming WebSocket frames, and `rp.spinOnce()` to detect whether the shared command buffer has changed since the last iteration.
+  </Step>
+  <Step title="mpu6050.update() — IMU Data Refresh">
+    Triggers a full MPU6050 read-and-integrate cycle. After this call, `getAngleY()`, `getGyroY()`, `getAngleX()`, `getAngleZ()`, and `getGyroZ()` return fresh values for the current iteration.
+  </Step>
+  <Step title="lqr_balance_loop() — LQR Pitch Balance">
+    Computes the scalar balance torque `LQR_u` from the four LQR state variables (pitch angle, pitch rate, wheel displacement, wheel speed). Includes liftoff detection, dead-band compensation, adaptive zero-point calibration, and adaptive speed gain. See [Control System](/reference/control-system) for full detail.
+  </Step>
+  <Step title="yaw_loop() — Yaw Heading Control">
+    Accumulates the incremental yaw angle (`YAW_angle_total`), adds joystick X contribution (`wrobot.joyx * 0.002`), and computes the differential torque offset `YAW_output` via two PID controllers.
+  </Step>
+  <Step title="leg_loop() → jump_loop() — Servo Actuation">
+    `leg_loop()` calls `jump_loop()` first. If not jumping, it computes servo positions from `wrobot.height` and the roll-compensation term `leg_position_add`, then issues a `SyncWritePosEx` command to both STS3032 servos.
+  </Step>
+  <Step title="Apply Torque Targets">
+    Splits the balance and yaw outputs across both wheel motors:
+
+    ```cpp
+    motor1.target = (-0.5) * (LQR_u + YAW_output);
+    motor2.target = (-0.5) * (LQR_u - YAW_output);
+    ```
+
+    The −0.5 factor accounts for the physical motor wiring polarity and the two-motor average.
+  </Step>
+  <Step title="Fall Detection">
+    Checks `abs(LQR_angle) > 25.0f`. If true, sets `uncontrolable = 1`. While `uncontrolable != 0`, increments the counter each cycle that `abs(LQR_angle) < 10.0f`. Resets `uncontrolable` to 0 after 200 consecutive qualifying cycles.
+  </Step>
+  <Step title="Disable Output When Stopped or Fallen">
+    If `wrobot.go == 0` (balance not enabled) or `uncontrolable != 0`, forces both motor targets to 0 and clears `leg_position_add`.
+  </Step>
+  <Step title="motor1.loopFOC() / motor2.loopFOC() — FOC Phase Voltage">
+    Runs the SimpleFOC Field-Oriented Control algorithm for each motor: reads the encoder, runs the current/voltage control loop, and calculates three-phase voltages.
+  </Step>
+  <Step title="motor1.move() / motor2.move() — Apply Voltage">
+    Writes the calculated phase voltages to the `BLDCDriver3PWM` outputs, physically actuating the wheel motors.
+  </Step>
+  <Step title="command.run() — Commander Serial Input">
+    Processes any characters available on `Serial` (115 200 baud). Dispatches single-letter commands to registered PID/LPF handlers for real-time parameter tuning. See [PID Parameters](/reference/pid-parameters) for the full channel map.
+  </Step>
+</Steps>
+
+## Object Instances
+
+All instances are declared at file scope in `wl_pro_robot.ino`.
+
+| Instance | Type | Purpose |
+|---|---|---|
+| `motor1`, `motor2` | `BLDCMotor(7)` | Left and right wheel BLDC motors; 7 pole pairs |
+| `driver1`, `driver2` | `BLDCDriver3PWM` | L6234-based 3-phase PWM gate drivers |
+| `sensor1`, `sensor2` | `MagneticSensorI2C` | AS5600 magnetic encoders (one per motor) |
+| `I2Cone`, `I2Ctwo` | `TwoWire` | I2C bus 0 (left encoder, GPIO 19/18) and bus 1 (right encoder + IMU, GPIO 23/5) |
+| `sms_sts` | `SMS_STS` | FEETECH STS3032 leg servo controller over `Serial2` at 1 000 000 baud |
+| `mpu6050` | `MPU6050` | 6-axis IMU on I2C bus 1 (`I2Ctwo`) |
+| `webserver` | `WebServer` | HTTP server on port 80; serves the embedded web UI |
+| `websocket` | `WebSocketsServer(81)` | WebSocket server on port 81; receives JSON control frames |
+| `rp` | `RobotProtocol(20)` | Command packet handler; owns the 20-byte `_now_buf` / `_old_buf` double-buffer |
+| `command` | `Commander(Serial)` | SimpleFOC Commander interface for real-time serial PID tuning |
+
+<Note>
+`motor1` and `motor2` are configured in **torque-voltage** mode (`TorqueControlType::voltage`, `MotionControlType::torque`). The high-level balance loop writes directly to `motor.target` as a voltage setpoint; the internal SimpleFOC velocity PID acts only as an anti-cogging inner loop.
+</Note>

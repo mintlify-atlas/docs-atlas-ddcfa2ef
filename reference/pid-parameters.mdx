@@ -1,0 +1,99 @@
+---
+title: "PID and Low-Pass Filter Parameter Reference"
+sidebarTitle: "PID Parameters"
+description: "Default values, limits, and Commander channel letters for all PID controllers and low-pass filters in the Micro Wheeled-Leg Robot firmware."
+---
+
+The firmware uses nine `PIDController` instances and three `LowPassFilter` instances, all provided by SimpleFOC. They form a cascade: the outer pitch/yaw/roll loops generate torque setpoints, a dead-band compensator handles the non-linear motor region near zero, and an adaptive integrator slowly trims the balance zero-point. Every controller is registered with the SimpleFOC `Commander` so its parameters can be adjusted over the Serial monitor at 115 200 baud without reflashing.
+
+## PID Controllers
+
+All `PIDController` instances are declared with `{.P, .I, .D, .ramp, .limit}` initialiser syntax. The ramp field limits the rate of change of the output per second; all controllers use `100000` (effectively unlimited) to preserve control bandwidth.
+
+| Commander | Variable | P | I | D | Ramp | Limit | Role |
+|---|---|---|---|---|---|---|---|
+| `A` | `pid_angle` | 1.0 | 0 | 0 | 100 000 | 8 | Pitch angle error → balance torque |
+| `B` | `pid_gyro` | 0.06 | 0 | 0 | 100 000 | 8 | Pitch rate (gyro Y) → balance torque |
+| `C` | `pid_distance` | 0.5 | 0 | 0 | 100 000 | 8 | Wheel displacement error → balance torque |
+| `D` | `pid_speed` | 0.7\* | 0 | 0 | 100 000 | 8 | Wheel speed error → balance torque (\*adaptive) |
+| `E` | `pid_yaw_angle` | 1.0 | 0 | 0 | 100 000 | 8 | Accumulated yaw angle error → differential torque |
+| `F` | `pid_yaw_gyro` | 0.04 | 0 | 0 | 100 000 | 8 | Yaw rate (gyro Z) → differential torque |
+| `H` | `pid_lqr_u` | 1.0 | 15 | 0 | 100 000 | 8 | Dead-band non-linearity compensation (PI) |
+| `I` | `pid_zeropoint` | 0.002 | 0 | 0 | 100 000 | 4 | Adaptive balance zero-point integrator |
+| `K` | `pid_roll_angle` | 8.0 | 0 | 0 | 100 000 | 450 | Roll angle error → leg servo differential |
+
+<Note>
+`pid_lqr_u` is the only controller with a non-zero integral term (I = 15). It only activates inside the dead-band (`|LQR_u| < 5`, joystick idle, `|distance_control| < 4`, not jumping). Its integrator is explicitly cleared (`pid_lqr_u.error_prev = 0`) whenever the dead-band condition is not met, preventing wind-up.
+</Note>
+
+## Low-Pass Filters
+
+SimpleFOC `LowPassFilter` instances are first-order IIR filters with time constant `Tf` (seconds). Smaller `Tf` = faster response but less smoothing.
+
+| Commander | Variable | Tf (s) | Input Signal |
+|---|---|---|---|
+| `G` | `lpf_joyy` | 0.2 | Joystick Y (`wrobot.joyy`) — smooths speed commands to the LQR speed term |
+| `J` | `lpf_zeropoint` | 0.1 | `distance_control` — filters the signal driving the adaptive zero-point integrator |
+| `L` | `lpf_roll` | 0.3 | Roll angle (`mpu6050.getAngleX() + 2.0`) — smooths roll compensation before the servo PID |
+
+## Motor Velocity PID
+
+The SimpleFOC inner velocity loop for each wheel motor is configured directly in `setup()` and is **not** accessible via the Commander interface. These values act as an anti-cogging inner loop within the voltage torque controller.
+
+```cpp
+motor1.PID_velocity.P = 0.05;
+motor1.PID_velocity.I = 1.0;
+motor1.PID_velocity.D = 0;
+
+motor2.PID_velocity.P = 0.05;
+motor2.PID_velocity.I = 1.0;
+motor2.PID_velocity.D = 0;
+```
+
+Both motors use identical values. To change them you must edit the source and reflash.
+
+## Adaptive pid_speed Gain
+
+`pid_speed.P` is overwritten every loop iteration in `lqr_balance_loop()` based on the current leg height. The Commander-set value for channel `D` will be overridden at runtime.
+
+| Leg Height (`wrobot.height`) | `pid_speed.P` |
+|---|---|
+| < 50 | 0.7 |
+| 50–63 | 0.6 |
+| ≥ 64 | 0.5 |
+
+A shorter leg stance produces faster inverted-pendulum dynamics and requires a higher speed gain. Taller stances are naturally slower and use a lower gain to avoid overshoot.
+
+## Commander Syntax Reference
+
+The Commander reads single-character channel identifiers from `Serial` (115 200 baud). Each channel maps to a registered PID or LPF instance. The syntax follows the SimpleFOC Commander convention:
+
+```
+<Channel><Field><Value>
+
+Fields:
+  P = proportional gain
+  I = integral gain
+  D = derivative gain
+  F = low-pass filter time constant (Tf)
+  R = output ramp limit
+  L = output limit
+
+Examples:
+  AP1.5      → pid_angle.P = 1.5
+  BP0.08     → pid_gyro.P = 0.08
+  HI20       → pid_lqr_u.I = 20
+  GF0.15     → lpf_joyy.Tf = 0.15
+  KL300      → pid_roll_angle.limit = 300
+  DP0.55     → pid_speed.P = 0.55  (overridden by adaptive logic each loop)
+```
+
+Sending a channel letter alone (e.g. `A`) prints the current values of that controller to Serial.
+
+<Warning>
+Commander changes are **volatile** and are lost on reboot. When you find values that work well, copy them back into the corresponding `PIDController` or `LowPassFilter` initialisers in `wl_pro_robot.ino` before reflashing.
+</Warning>
+
+<Tip>
+SimpleFOC Commander echoes the new parameter value back over Serial immediately after a write. Watch the Serial Monitor to confirm the value was parsed correctly — a malformed string (e.g. missing numeric digits) will leave the parameter unchanged and Commander will not print an acknowledgement.
+</Tip>

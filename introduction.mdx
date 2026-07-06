@@ -1,0 +1,66 @@
+---
+title: "Micro Wheeled-Leg Robot: Open-Source Desktop Balancing Robot"
+sidebarTitle: "Introduction"
+description: "An open-source, desktop-scale dual-wheeled-leg balancing robot using ESP32, SimpleFOC motor control, LQR self-balancing, and WiFi remote control via a browser."
+---
+
+The Micro Wheeled-Leg Robot is a fully open-source, desktop-scale balancing robot that combines two brushless wheel motors with two servo-actuated legs to achieve dynamic self-balancing locomotion. Designed to be approachable for hobbyists, students, and robotics researchers alike, it demonstrates advanced control theory — specifically Linear Quadratic Regulator (LQR) balance control — in a compact, reproducible platform that sits comfortably on a desk. Every component, from the mechanical CAD files to the PCB Gerbers to the Arduino firmware, is freely available and designed to be built at home or with low-cost fabrication services.
+
+## What Makes It Unique
+
+The Micro Wheeled-Leg Robot claims the title of the world's smallest desktop-class dual-wheeled-leg balancing robot. Unlike single-axis balancing robots that only roll forward and backward, this robot uses a pair of FEETECH STS3032 bus servos to dynamically raise and lower its legs, enabling variable ride height and even a jump maneuver. The entire control stack — IMU sensing, LQR balance, yaw steering, leg actuation, and browser-based remote control — runs on a single ESP32 microcontroller with no companion computer required.
+
+<CardGroup cols={2}>
+  <Card
+    title="Build Guide"
+    icon="screwdriver-wrench"
+    href="/build/mechanical"
+  >
+    Step-by-step assembly of the mechanical structure, CNC parts, carbon fiber panels, and 3D-printed components.
+  </Card>
+  <Card
+    title="Firmware Setup"
+    icon="microchip"
+    href="/firmware/setup"
+  >
+    Flash the ESP32, configure SimpleFOC motor parameters, calibrate the servos, and set your WiFi mode.
+  </Card>
+  <Card
+    title="Operation"
+    icon="gamepad"
+    href="/operation/startup"
+  >
+    Power-on sequence, connecting to the robot's WiFi hotspot, and driving with the browser joystick interface.
+  </Card>
+  <Card
+    title="Software Reference"
+    icon="code"
+    href="/reference/software-architecture"
+  >
+    Detailed reference for firmware modules, control loop parameters, WebSocket protocol, and the Wrobot struct.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+The robot's behavior emerges from several tightly integrated subsystems that all execute inside a single Arduino-style loop on the ESP32.
+
+**ESP32 as the sole compute platform.** The ESP32-WROOM-32 runs the complete control pipeline — sensor reading, balance computation, motor output, servo actuation, and WiFi communication — in one continuous main loop. There is no RTOS task separation; every subsystem gets called sequentially each iteration: `bat_check()`, `web_loop()`, `mpu6050.update()`, `lqr_balance_loop()`, `yaw_loop()`, `leg_loop()`, followed by motor FOC updates.
+
+**SimpleFOC for brushless wheel motors.** Two BLDC motors, each driven by an L6234PD013TR three-phase gate driver, are controlled using the [SimpleFOC](https://simplefoc.com) library in torque/voltage control mode. Each motor has a dedicated AS5600 magnetic encoder on its own I²C bus (`I2Cone` on pins 19/18, `I2Ctwo` on pins 23/5) providing shaft angle and velocity feedback at 400 kHz.
+
+**LQR algorithm for pitch balance.** Self-balancing is achieved with a Linear Quadratic Regulator decomposed into four proportional gains acting on pitch angle, pitch rate, wheel displacement, and wheel speed. The combined output `LQR_u` is split equally between the two motors with opposite sign to produce a net forward/backward torque that keeps the robot upright. A small integrating PID (`pid_lqr_u`) compensates for low-torque nonlinearity, and a center-of-gravity adaptive term (`pid_zeropoint`) continuously trims the balance point.
+
+**FEETECH STS3032 servos for variable leg height.** Two STS3032 smart bus servos (IDs 1 and 2, connected via Serial2 at 1 Mbaud) control leg elevation. Their positions are computed from the WebSocket `height` command and a roll-axis correction term (`pid_roll_angle`) derived from MPU6050 roll data, keeping the chassis level on uneven terrain. A dedicated jump routine can command both servos to their mechanical limits at maximum speed to launch the robot briefly off the ground.
+
+**MPU6050 IMU for angle and rate feedback.** An MPU6050 module, sharing the second I²C bus with the right encoder, provides pitch angle (`getAngleY()`), pitch rate (`getGyroY()`), roll angle (`getAngleX()`), yaw angle (`getAngleZ()`), and yaw rate (`getGyroZ()`) after automatic gyro offset calibration at startup.
+
+**WiFi + WebSocket browser remote control.** The ESP32 hosts an HTTP server on port 80 serving an embedded single-page application (stored in `basic_web.h`) and a WebSocket server on port 81. The browser renders a joystick and control buttons; user inputs are encoded as JSON and sent over WebSocket. The firmware's `RobotProtocol::parseBasic()` method decodes each JSON message into the `Wrobot` struct, whose fields (`joyy`, `joyx`, `height`, `dir`, `go`) drive the control loops directly. Both AP mode (the robot creates its own hotspot named `WL…`) and STA mode (the robot joins an existing network) are supported.
+
+## Open-Source Contributors
+
+The Micro Wheeled-Leg Robot was created by **Mu Shibo** and **Li Yufeng**. The project is released under the MIT License, welcoming contributions, forks, and derivative designs from the community.
+
+<Note>
+  All design files are available on GitHub: STL files for 3D-printed parts, CNC drawings for the steel base and aluminum motor mounts, carbon fiber panel DWG/PDF layouts, PCB schematics and Gerbers (designed in LCEDA) for all four boards, a complete BOM, and the full Arduino firmware. No files are paywalled or hidden.
+</Note>
