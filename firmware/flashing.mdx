@@ -1,7 +1,7 @@
 ---
-title: "Flash Firmware to the ESP32 Controller Board"
+title: "Flash Firmware to the Wheeled-Leg Robot ESP32 Board"
 sidebarTitle: "Flashing"
-description: "Connect the Controller PCB via Micro-USB, select the correct COM port in Arduino IDE, and upload the firmware to the ESP32."
+description: "Connect the Controller PCB via Micro-USB, select the correct COM port in Arduino IDE, upload the firmware, and verify a clean boot on the ESP32."
 ---
 
 With the Arduino IDE configured, libraries installed, and your WiFi and balance parameters set, you are ready to compile and flash the firmware to the ESP32 Controller PCB. Flashing is done over the Micro-USB port on the controller board — no external programmer is required. The entire process takes about one to two minutes on a typical machine.
@@ -46,7 +46,7 @@ With the Arduino IDE configured, libraries installed, and your WiFi and balance 
   <Step title="Open the Serial Monitor to confirm a clean boot">
     In Arduino IDE, open **Tools → Serial Monitor** and set the baud rate to **115200**. During boot you will see output from the SimpleFOC library confirming motor initialisation, followed by periodic battery voltage readings once the main loop starts. A successful boot log looks similar to:
 
-    ```
+    ```text
     MOT: Monitor enabled!
     MOT: Init
     MOT: Enable driver.

@@ -1,5 +1,5 @@
 ---
-title: "System Architecture and Component Overview"
+title: "Micro Wheeled-Leg Robot: System Architecture and Components"
 sidebarTitle: "Overview"
 description: "A complete map of the Micro Wheeled-Leg Robot subsystems: mechanical structure, four custom PCBs, ESP32 firmware modules, and the WiFi control stack."
 ---
@@ -81,17 +81,17 @@ The ESP32 simultaneously runs two servers in the `web_loop()` call each iteratio
 - **`WebServer` on port 80** — serves the embedded HTML/JS page from `basic_web.h` via a single `GET /` route, accessible at `192.168.1.11` in AP mode.
 - **`WebSocketsServer` on port 81** — receives real-time JSON frames from the browser joystick interface.
 
-Each WebSocket frame carries a `mode` field. When `mode` is `"basic"`, `RobotProtocol::parseBasic()` extracts the joystick axes, direction, height, and go-flag from the `StaticJsonDocument<300>` and writes them into the global `Wrobot wrobot` struct. The control loops read from this struct on every iteration, so the latency from browser input to motor response is bounded by one main-loop cycle.
+Each WebSocket frame carries a `mode` field. When `mode` is `"basic"`, `RobotProtocol::parseBasic()` extracts the joystick axes (`joy_y`, `joy_x`), direction, height, and stable flag from the `StaticJsonDocument<300>` and writes them into the global `Wrobot wrobot` struct. The control loops read from this struct on every iteration, so the latency from browser input to motor response is bounded by one main-loop cycle.
 
 <Steps>
   <Step title="Browser sends JSON">
-    The user moves the joystick or taps a button in the browser. The JavaScript client encodes the action as a JSON object (e.g., `{"mode":"basic","joyy":50,"joyx":0,"height":38,"go":true}`) and transmits it over WebSocket to port 81.
+    The user moves the joystick or taps a button in the browser. The JavaScript client encodes the action as a JSON object (e.g., `{"mode":"basic","joy_y":50,"joy_x":0,"height":38,"stable":1}`) and transmits it over WebSocket to port 81.
   </Step>
   <Step title="WebSocket receives and parses">
     The `webSocketEventCallback()` fires on `WStype_TEXT`, deserializes the payload into a `StaticJsonDocument<300>`, checks the `mode` field, and calls `rp.parseBasic(doc)` to decode command fields.
   </Step>
   <Step title="Wrobot struct updated">
-    `RobotProtocol::parseBasic()` writes decoded values into the global `wrobot` struct fields: `joyy`, `joyx`, `dir`, `height`, and `go`. `spinOnce()` handles buffer refresh logic to detect stale commands.
+    `RobotProtocol::parseBasic()` writes decoded values into the global `wrobot` struct fields: `joyy` (from JSON `joy_y`), `joyx` (from JSON `joy_x`), `dir`, `height`, and `go` (from JSON `stable`). `spinOnce()` handles buffer refresh logic to detect stale commands.
   </Step>
   <Step title="Control loops compute torque">
     On the next main-loop iteration, `lqr_balance_loop()` reads `wrobot.joyy` to set the wheel speed target, `yaw_loop()` reads `wrobot.joyx` to accumulate heading demand, and `leg_loop()` reads `wrobot.height` to set servo positions. All loops produce their outputs before `motor.move()` is called.

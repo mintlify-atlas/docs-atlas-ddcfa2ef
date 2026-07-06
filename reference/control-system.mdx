@@ -1,7 +1,7 @@
 ---
-title: "LQR Balance and Motion Control System Reference"
+title: "LQR Balance and Motion Control System Firmware Reference"
 sidebarTitle: "Control System"
-description: "Technical reference for the LQR pitch balance loop, yaw cascade controller, leg roll compensation, jump sequence, and fall detection in the Wheeled-Leg Robot."
+description: "Technical reference for the LQR pitch balance loop, yaw cascade, leg roll compensation, jump sequence, and fall detection in the Wheeled-Leg Robot."
 ---
 
 The robot uses a decomposed LQR controller for self-balancing, implemented as four cascaded proportional controllers operating on pitch angle, pitch rate, wheel displacement, and wheel speed. A separate cascade controls yaw heading via differential wheel torque. Leg height and roll are managed by the STS3032 servo pair, and a jump state machine uses servo speed bursts to achieve ground-clearance hops.

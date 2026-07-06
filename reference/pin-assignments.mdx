@@ -1,7 +1,7 @@
 ---
 title: "ESP32 GPIO Pin Assignments and Interface Reference"
 sidebarTitle: "Pin Assignments"
-description: "Full GPIO pinout for the Micro Wheeled-Leg Robot Controller PCB: motor PWM, I2C buses, UART ports, ADC, and LED assignments."
+description: "Complete GPIO pinout for the Micro Wheeled-Leg Robot Controller PCB: motor PWM, encoder I2C buses, servo UART, battery ADC, and LED pin assignments."
 ---
 
 The Controller PCB is built around the **ESP32-WROOM-32** module (U5) — a dual-core 240 MHz Xtensa LX6 SoC with integrated WiFi and Bluetooth. Of its available GPIOs, eighteen are committed to fixed hardware functions: six PWM channels and two enable lines for the BLDC motor drivers, four I2C lines across two independent buses, four UART lines across two serial ports, one ADC input for battery monitoring, and one digital output for the battery LED. The tables below document every assigned pin, cross-referenced to the firmware source (`wl_pro_robot.ino`).
@@ -24,7 +24,7 @@ Both BLDC motors are driven by the SimpleFOC `BLDCDriver3PWM` class. Each driver
 | 12 | Enable | Motor 2 (right wheel) | L6234 EN — active high |
 
 <Note>
-  GPIO 12 is a **strapping pin** on the ESP32. If it is pulled HIGH at power-on, the ESP32 will configure its flash voltage to 1.8 V, which prevents correct booting on most modules. Because the L6234 enable signal is driven HIGH only after `driver2.init()` is called in `setup()`, GPIO 12 is naturally LOW during the boot strapping window — no external pull-down is required. Be aware of this constraint if you modify the enable logic or add external circuitry to GPIO 12.
+  GPIO 12 is the **Motor 2 Enable pin** and also a **strapping pin** on the ESP32. If it is pulled HIGH at power-on, the ESP32 will configure its flash voltage to 1.8 V, which prevents correct booting on most modules. Because the L6234 enable signal is driven HIGH only after `driver2.init()` is called in `setup()`, GPIO 12 is naturally LOW during the boot strapping window — no external pull-down is required. Be aware of this constraint if you modify the enable logic or add external circuitry to GPIO 12.
 </Note>
 
 ---
@@ -54,8 +54,8 @@ Two UART ports are used: UART0 for USB debug output and the SimpleFOC Commander 
 |------|--------|------|-----------|---------|
 | 1 | TX | Serial (UART0) | 115,200 | USB debug output + SimpleFOC Commander |
 | 3 | RX | Serial (UART0) | 115,200 | USB debug input + SimpleFOC Commander |
-| 16 | TX | Serial2 (UART2) | 1,000,000 | STS3032 servo bus TX → Servo Debug PCB |
-| 17 | RX | Serial2 (UART2) | 1,000,000 | STS3032 servo bus RX ← Servo Debug PCB |
+| 17 | TX | Serial2 (UART2) | 1,000,000 | STS3032 servo bus TX → Servo Debug PCB |
+| 16 | RX | Serial2 (UART2) | 1,000,000 | STS3032 servo bus RX ← Servo Debug PCB |
 
 The SimpleFOC Commander is mapped to `Serial` (UART0) and exposes PID and LPF tuning parameters over the USB serial connection at 115,200 baud. Serial2 operates at 1 Mbit/s to meet the STS3032's bus timing requirements; this baud rate is set by `Serial2.begin(1000000)` in `setup()`.
 
@@ -86,7 +86,7 @@ else
     digitalWrite(LED_BAT, LOW);
 ```
 
-The multiplier 3.97 is derived from the voltage divider: `(R7 + R8) / R8 = (100000 + 40200) / 40200 ≈ 3.49`, scaled against the ADC's 3.3 V full-scale reference. Use the calibrated `esp_adc_cal_raw_to_voltage()` output rather than the raw 12-bit value for best accuracy across temperature and supply variation.
+The theoretical voltage divider ratio is `(R7 + R8) / R8 = (100000 + 40200) / 40200 ≈ 3.49`. However, the firmware uses the empirical calibration constant **3.97** — this value was determined by measurement and accounts for real-world effects such as ADC input impedance loading the divider and component tolerances. The 3.97 constant is baked directly into the source as `double battery=(voltage*3.97)/1000.0;` and should not be changed without re-measuring against a known reference voltage. Use the calibrated `esp_adc_cal_raw_to_voltage()` output rather than the raw 12-bit value for best accuracy across temperature and supply variation.
 
 ---
 

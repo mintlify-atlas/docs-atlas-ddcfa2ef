@@ -1,7 +1,7 @@
 ---
-title: "WebSocket JSON Control Protocol Reference"
+title: "WebSocket JSON Control Protocol Reference for ESP32 Robot"
 sidebarTitle: "WebSocket Protocol"
-description: "Reference for the WebSocket JSON protocol used by the browser interface to control the Micro Wheeled-Leg Robot: message format, field types, and direction encoding."
+description: "Reference for the WebSocket JSON protocol used by the browser UI to drive the Micro Wheeled-Leg Robot: message fields, direction enum, and buffer layout."
 ---
 
 The robot exposes a WebSocket server on port 81 alongside its HTTP server on port 80. The browser-based control interface (served from `/`) opens a persistent WebSocket connection and sends UTF-8 JSON text frames to command the robot. Every incoming frame is deserialised into a `StaticJsonDocument<300>` and, if the `mode` field equals `"basic"`, handed to `RobotProtocol::parseBasic()` which updates the global `Wrobot` struct and the internal 20-byte command buffer.

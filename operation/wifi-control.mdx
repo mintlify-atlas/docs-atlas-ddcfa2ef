@@ -1,7 +1,7 @@
 ---
-title: "Control the Robot via WiFi Browser Interface"
+title: "Control the Wheeled-Leg Robot via WiFi Browser Interface"
 sidebarTitle: "WiFi Control"
-description: "Connect to the robot's WiFi hotspot, open the browser remote control page at 192.168.1.11, and use the joystick to drive, turn, adjust height, and trigger a jump."
+description: "Connect to the robot WiFi hotspot, open the browser control page at 192.168.1.11, and use the joystick to drive, turn, adjust height, and trigger a jump."
 ---
 
 The Micro Wheeled-Leg Robot hosts a complete browser-based remote-control interface served directly from ESP32 flash memory — no app download or internet connection required. Once you join the robot's access point and navigate to its IP address, a WebSocket connection is established between your browser and the on-board WebSocket server running on port 81. Every joystick movement, height adjustment, and button press sends a small JSON message over that socket, which the firmware parses in real time through the `RobotProtocol::parseBasic()` handler.

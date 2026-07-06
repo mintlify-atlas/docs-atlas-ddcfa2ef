@@ -1,7 +1,7 @@
 ---
 title: "Micro Wheeled-Leg Robot: Open-Source Desktop Balancing Robot"
 sidebarTitle: "Introduction"
-description: "An open-source, desktop-scale dual-wheeled-leg balancing robot using ESP32, SimpleFOC motor control, LQR self-balancing, and WiFi remote control via a browser."
+description: "An open-source, desktop-scale dual-wheeled-leg balancing robot using ESP32, SimpleFOC motor control, LQR self-balancing, and WiFi browser remote control."
 ---
 
 The Micro Wheeled-Leg Robot is a fully open-source, desktop-scale balancing robot that combines two brushless wheel motors with two servo-actuated legs to achieve dynamic self-balancing locomotion. Designed to be approachable for hobbyists, students, and robotics researchers alike, it demonstrates advanced control theory — specifically Linear Quadratic Regulator (LQR) balance control — in a compact, reproducible platform that sits comfortably on a desk. Every component, from the mechanical CAD files to the PCB Gerbers to the Arduino firmware, is freely available and designed to be built at home or with low-cost fabrication services.
@@ -55,7 +55,7 @@ The robot's behavior emerges from several tightly integrated subsystems that all
 
 **MPU6050 IMU for angle and rate feedback.** An MPU6050 module, sharing the second I²C bus with the right encoder, provides pitch angle (`getAngleY()`), pitch rate (`getGyroY()`), roll angle (`getAngleX()`), yaw angle (`getAngleZ()`), and yaw rate (`getGyroZ()`) after automatic gyro offset calibration at startup.
 
-**WiFi + WebSocket browser remote control.** The ESP32 hosts an HTTP server on port 80 serving an embedded single-page application (stored in `basic_web.h`) and a WebSocket server on port 81. The browser renders a joystick and control buttons; user inputs are encoded as JSON and sent over WebSocket. The firmware's `RobotProtocol::parseBasic()` method decodes each JSON message into the `Wrobot` struct, whose fields (`joyy`, `joyx`, `height`, `dir`, `go`) drive the control loops directly. Both AP mode (the robot creates its own hotspot named `WL…`) and STA mode (the robot joins an existing network) are supported.
+**WiFi + WebSocket browser remote control.** The ESP32 hosts an HTTP server on port 80 serving an embedded single-page application (stored in `basic_web.h`) and a WebSocket server on port 81. The browser renders a joystick and control buttons; user inputs are encoded as JSON and sent over WebSocket. The firmware's `RobotProtocol::parseBasic()` method decodes each JSON message into the `Wrobot` struct — JSON fields `joy_y`, `joy_x`, `height`, `dir`, and `stable` map to struct fields `joyy`, `joyx`, `height`, `dir`, and `go` respectively — and the control loops read directly from this struct. Both AP mode (the robot creates its own hotspot named `WL…`) and STA mode (the robot joins an existing network) are supported.
 
 ## Open-Source Contributors
 
